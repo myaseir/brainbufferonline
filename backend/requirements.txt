@@ -5,6 +5,7 @@ pymongo
 python-jose[cryptography]
 passlib[bcrypt]
 pydantic[email]
+pydantic-settings
 websockets
 python-multipart
 dnspython
