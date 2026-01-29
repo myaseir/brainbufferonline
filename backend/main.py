@@ -17,12 +17,11 @@ async def lifespan(app: FastAPI):
     # 2. SHUTDOWN & CLEANUP
     print("🛑 Glacia Connection Shutting Down...")
     
-    # FIX: Updated loop to handle the new 'active_matches' structure
+    # Gracefully close active Game WebSockets
     if active_matches:
-        for match_id, match_data in active_matches.items():
-            # Safely get the 'players' dict from the match data
+        # We create a list of items to avoid "dictionary changed size during iteration" errors
+        for match_id, match_data in list(active_matches.items()):
             players = match_data.get("players", {})
-            
             for ws in players.values():
                 try:
                     await ws.send_json({
@@ -40,10 +39,11 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# --- 🌍 CORS CONFIGURATION ---
+# --- 🌍 CORS CONFIGURATION (UPDATED FOR PRODUCTION) ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"], 
+    # 👇 CHANGE THIS to ["*"] to allow Vercel/Any frontend to connect
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -61,7 +61,7 @@ def read_root():
     return {
         "status": "Glacia Connection Live",
         "version": "1.0.0",
-        "environment": "Development",
+        "environment": "Production", # Updated label
         "owner": "Glacia Connection",
         "developer": "Muhammad Yasir"
     }

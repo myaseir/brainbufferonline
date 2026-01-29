@@ -45,8 +45,12 @@ export default function Home() {
         matchmakingSocketRef.current.close();
     }
 
-    // 3. Open New Connection
-    const mmWs = new WebSocket(`ws://127.0.0.1:8000/api/game/ws/matchmaking?token=${token}`);
+    // 3. Prepare WebSocket URL (Handle http -> ws and https -> wss)
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+    const WS_URL = API_URL.replace(/^http/, 'ws'); // Automatically switches http->ws or https->wss
+
+    // 4. Open New Connection
+    const mmWs = new WebSocket(`${WS_URL}/api/game/ws/matchmaking?token=${token}`);
     matchmakingSocketRef.current = mmWs;
 
     mmWs.onmessage = (event) => {
@@ -54,7 +58,7 @@ export default function Home() {
       
       if (data.status === "MATCH_FOUND") {
         // Match found! Connect to the specific game ID
-        const gameSocket = new WebSocket(`ws://127.0.0.1:8000/api/game/ws/match/${data.match_id}?token=${token}`);
+        const gameSocket = new WebSocket(`${WS_URL}/api/game/ws/match/${data.match_id}?token=${token}`);
         setMatchSocket(gameSocket);
         setGameMode('online');
         setView('playing');
@@ -73,7 +77,7 @@ export default function Home() {
     mmWs.onerror = () => {
       // Only alert if the connection wasn't intentionally closed
       if (mmWs.readyState !== WebSocket.CLOSED) {
-         // alert("Connection Error. Is the server running?"); // Optional: Silence this for smoother UX
+         // alert("Connection Error. Is the server running?"); 
          setView('dashboard');
       }
     };
