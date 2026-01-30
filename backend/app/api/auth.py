@@ -42,31 +42,28 @@ from email.message import EmailMessage
 
 def send_otp_email(target_email: str, code: str):
     msg = EmailMessage()
-    msg.set_content(f"Welcome to BrainBuffer! Your verification code is: {code}")
-    msg['Subject'] = 'Verify Your Account'
-    msg['From'] = settings.EMAIL_USER 
+    msg.set_content(f"Your code is: {code}")
+    msg['Subject'] = 'Verification'
+    msg['From'] = settings.EMAIL_USER
     msg['To'] = target_email
 
     try:
-        # STEP 1: Use standard SMTP (NOT SMTP_SSL) on Port 587
-        server = smtplib.SMTP("smtp.gmail.com", 587, timeout=15)
+        # Force IPv4 to avoid Render IPv6 routing issues
+        # We use a timeout to catch the 'unreachable' error quickly
+        server = smtplib.SMTP("smtp.gmail.com", 587, timeout=20)
+        server.set_debuglevel(1) # This will show the full handshake in Render logs
         
-        # STEP 2: Identify yourself to the server
+        server.ehlo()
+        server.starttls() 
         server.ehlo()
         
-        # STEP 3: Secure the connection (This makes it 587 compatible)
-        server.starttls() 
-        
-        # STEP 4: Login and send
         server.login(settings.EMAIL_USER, settings.EMAIL_PASS)
         server.send_message(msg)
         server.quit()
-        
-        print(f"✅ OTP successfully sent to {target_email}")
-            
+        print(f"✅ Email sent to {target_email}")
+
     except Exception as e:
-        # If this fails, the error will tell us if it's a login issue or a network issue
-        print(f"❌ SMTP Error Detail: {type(e).__name__} - {e}")
+        print(f"❌ Still failing! Error: {e}")
 # --- Endpoints ---
 
 @router.get("/me")
