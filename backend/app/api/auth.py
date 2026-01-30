@@ -1,13 +1,13 @@
 import random
-import resend
 import asyncio
-from email.message import EmailMessage
+import requests
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, status
 from pydantic import BaseModel, EmailStr
 from app.services.auth_service import AuthService
 from app.core.security import create_access_token
-from app.core.deps import get_current_user  # ✅ Corrected Import
-from app.core.config import settings
+from app.core.deps import get_current_user
+from app.core.config import settings  # ✅ Uses your updated config
+
 router = APIRouter()
 auth_service = AuthService()
 
@@ -34,53 +34,75 @@ async def cleanup_otp(email: str, delay: int = 600):
     if email in pending_users:
         del pending_users[email]
 
-# --- Helper: Email Sender ---
-import smtplib
-from email.message import EmailMessage
-# Import your settings instance
-# from app.core.config import settings 
-
+# --- Helper: Email Sender (Brevo API) ---
 def send_otp_email(target_email: str, code: str):
     """
-    Sends an OTP email using the Resend API.
-    Bypasses SMTP port blocking on hosting providers like Render.
+    Sends an OTP email using the Brevo HTTP API.
+    ✅ Works on Render (Bypasses SMTP port blocking).
+    ✅ Uses credentials from app.core.config.settings
     """
-    # Initialize the Resend client with your API key
-    resend.api_key = settings.RESEND_API_KEY
+    
+    # 1. Get Credentials from Settings
+    brevo_key = settings.BREVO_API_KEY
+    sender_email = settings.SENDER_EMAIL
 
-    try:
-        # Define the email parameters
-        params = {
-            # Use 'onboarding@resend.dev' if you haven't verified a custom domain yet
-            "from": "BrainBuffer <onboarding@resend.dev>",
-            "to": [target_email],
-            "subject": "Verify Your BrainBuffer Account",
-            "html": f"""
-                <div style="font-family: Arial, sans-serif; max-width: 400px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #f8fafc;">
-                    <h2 style="color: #1e293b; text-align: center;">Security Code</h2>
-                    <p style="color: #475569; text-align: center;">Enter the code below to verify your account:</p>
-                    <div style="background-color: #ffffff; border: 2px dashed #cbd5e1; border-radius: 8px; padding: 15px; margin: 20px 0; text-align: center;">
-                        <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #0f172a;">{code}</span>
-                    </div>
-                    <p style="font-size: 12px; color: #94a3b8; text-align: center;">This code will expire in 10 minutes.</p>
+    if not brevo_key:
+        print("❌ Error: BREVO_API_KEY is missing in settings")
+        return
+
+    # 2. Brevo API Endpoint
+    url = "https://api.brevo.com/v3/smtp/email"
+    
+    # 3. Headers
+    headers = {
+        "accept": "application/json",
+        "api-key": brevo_key,
+        "content-type": "application/json"
+    }
+
+    # 4. Email Payload
+    payload = {
+        "sender": {
+            "name": settings.PROJECT_NAME, # Uses your project name from config
+            "email": sender_email 
+        },
+        "to": [
+            {
+                "email": target_email
+            }
+        ],
+        "subject": f"Verify Your {settings.PROJECT_NAME} Account",
+        "htmlContent": f"""
+            <div style="font-family: Arial, sans-serif; max-width: 400px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #f8fafc;">
+                <h2 style="color: #1e293b; text-align: center;">Security Code</h2>
+                <p style="color: #475569; text-align: center;">Enter the code below to verify your account:</p>
+                <div style="background-color: #ffffff; border: 2px dashed #cbd5e1; border-radius: 8px; padding: 15px; margin: 20px 0; text-align: center;">
+                    <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #0f172a;">{code}</span>
                 </div>
-            """
-        }
+                <p style="font-size: 12px; color: #94a3b8; text-align: center;">This code will expire in 10 minutes.</p>
+            </div>
+        """
+    }
 
-        # Trigger the send via API
-        email_response = resend.Emails.send(params)
-        print(f"✅ OTP successfully sent via Resend API! ID: {email_response.get('id')}")
-
+    # 5. Send Request
+    try:
+        response = requests.post(url, json=payload, headers=headers)
+        
+        # Check for success (201 Created or 200 OK)
+        if response.status_code in [200, 201, 202]:
+            print(f"✅ OTP successfully sent to {target_email} via Brevo API!")
+        else:
+            print(f"❌ Brevo API Error: {response.status_code} - {response.text}")
+            
     except Exception as e:
-        # This will catch API errors (like invalid keys or unverified recipients)
-        print(f"❌ Resend API Error: {type(e).__name__} - {e}")
+        print(f"❌ Exception sending email: {type(e).__name__} - {e}")
+
 # --- Endpoints ---
 
 @router.get("/me")
 async def get_current_user_details(user: dict = Depends(get_current_user)):
     """
     Fetches the current authenticated user's fresh data from the DB.
-    The 'user' dict is provided by the get_current_user dependency.
     """
     return {
         "username": user.get("username"),
@@ -88,7 +110,6 @@ async def get_current_user_details(user: dict = Depends(get_current_user)):
         "wallet_balance": user.get("wallet_balance", 0),
         "user_id": str(user.get("_id")),
         "total_wins": user.get("total_wins", 0),
-        # ✅ ADD THESE TWO LINES BELOW
         "total_matches": user.get("total_matches", 0),
         "recent_matches": user.get("recent_matches", []), 
         "rank": user.get("rank", "Elite")
@@ -136,6 +157,7 @@ async def signup_request(user_data: SignupRequest, background_tasks: BackgroundT
         "code": otp_code
     }
     
+    # Add email sending to background task to keep API fast
     background_tasks.add_task(send_otp_email, user_data.email, otp_code)
     background_tasks.add_task(cleanup_otp, user_data.email)
     

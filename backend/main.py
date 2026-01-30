@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db.mongodb import connect_to_mongo, close_mongo_connection
 from app.api import auth, wallet, game_ws, leaderboard, admin 
 from app.api.game_ws import active_matches
+from app.core.config import settings  # ✅ Import Settings
 import logging
 import os
 
@@ -14,11 +15,17 @@ logger = logging.getLogger("uvicorn.error")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- Startup Logic ---
-    logger.info("🚀 Glacia Connection: Initializing MongoDB...")
+    logger.info(f"🚀 {settings.PROJECT_NAME}: Initializing...")
+
+    # 1. Check Email Config (Sanity Check)
+    if settings.BREVO_API_KEY:
+        logger.info("📧 Email Service: Brevo API (HTTP) Enabled")
+    else:
+        logger.warning("⚠️ Email Service: No API Key found! Emails will not send.")
+
+    # 2. Database Connection
     try:
         await connect_to_mongo()
-        # If you use Redis for matchmaking, initialize it here
-        # await connect_to_redis() 
         logger.info("✅ Database systems online.")
     except Exception as e:
         logger.error(f"❌ Startup Error: {e}")
@@ -43,7 +50,12 @@ async def lifespan(app: FastAPI):
     await close_mongo_connection()
     logger.info("🛑 Glacia Connection: Offline.")
 
-app = FastAPI(title="Glacia Backend", version="1.2.2", lifespan=lifespan)
+# ✅ Use settings for Title and Version
+app = FastAPI(
+    title=settings.PROJECT_NAME, 
+    version=settings.VERSION, 
+    lifespan=lifespan
+)
 
 # --- 🔒 CORS SETUP (Production Ready) ---
 origins = [
@@ -85,6 +97,7 @@ app.include_router(admin.router, prefix="/api/admin", tags=["System-Admin"])
 def read_root():
     return {
         "status": "Online", 
-        "version": "1.2.2", 
+        "project": settings.PROJECT_NAME,
+        "version": settings.VERSION, 
         "environment": os.getenv("RENDER", "local_development")
     }

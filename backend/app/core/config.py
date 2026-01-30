@@ -8,7 +8,6 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api" 
     
     # 2. Security
-    # Set these as ENV VARS on Render for production safety
     SECRET_KEY: str = Field(default="dev-secret-key-change-this")
     ADMIN_SECRET_KEY: str = Field(default="dev-admin-key-change-this") 
     ALGORITHM: str = "HS256"
@@ -21,14 +20,13 @@ class Settings(BaseSettings):
     # 4. Redis Configuration
     REDIS_URL: str = Field(default="redis://localhost:6379")
 
-    # 5. Resend Email Configuration (API based - bypasses Render's SMTP block)
-    # Pydantic will automatically look for an ENV VAR named RESEND_API_KEY
-    RESEND_API_KEY: str = Field(default="")
+    # 5. Brevo Email Configuration (Replaces Resend)
+    # These will automatically load from your .env file
+    BREVO_API_KEY: str = Field(default="") 
+    SENDER_EMAIL: str = Field(default="myaseir404@gmail.com")
 
     # 6. Environment Config
     model_config = SettingsConfigDict(
-        # Pydantic reads .env first, but OS Environment Variables (Render) 
-        # will ALWAYS override the .env file.
         env_file=".env", 
         env_file_encoding='utf-8',
         case_sensitive=True,
