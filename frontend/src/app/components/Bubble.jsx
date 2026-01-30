@@ -1,7 +1,8 @@
 "use client";
 import ParticlesBackground from './ParticlesBackground';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Trophy, Users, RotateCcw, Volume2, VolumeX, Smartphone, Zap, Play, X, Share2, Info, Check, MinusCircle, Loader2, Clock } from 'lucide-react';
+import { Trophy, Users, RotateCcw, Volume2, VolumeX, Play, X, Share2, Info, Check, MinusCircle, Loader2, Clock } from 'lucide-react';
+import GameNavbar from './GameNavbar'; 
 
 let bgMusicInstance = null;
 
@@ -28,10 +29,9 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
   const [connectionStatus, setConnectionStatus] = useState('Connecting...'); 
   const serverRoundsRef = useRef(null); 
 
-  // --- NEW STATES FOR UI ---
   const [opponentName, setOpponentName] = useState('Opponent'); 
   const [waitingForResult, setWaitingForResult] = useState(false);
-const [isForfeit, setIsForfeit] = useState(false); // Track if the win was via forfeit
+  const [isForfeit, setIsForfeit] = useState(false); 
   const [numbers, setNumbers] = useState([]);
   const [positions, setPositions] = useState([]);
   const [score, setScore] = useState(0);
@@ -119,40 +119,29 @@ const [isForfeit, setIsForfeit] = useState(false); // Track if the win was via f
           if (data.type === 'MATCH_START') {
             clearInterval(readyInterval); 
             serverRoundsRef.current = data.gameData.rounds;
-            
-            // --- 1. SET OPPONENT NAME ---
             if(data.opponent) setOpponentName(data.opponent);
-            
             setConnectionStatus('Match Starting...');
             startGame();
           } 
           else if (data.type === 'MATCH_ABORTED') {
             clearInterval(readyInterval);
-            setConnectionStatus('Opponent left. Re-queuing...');
-            setTimeout(() => { if (onRequeue) onRequeue(); else if (onQuit) onQuit(); }, 1500);
+            const leaver = data.leaver_name || 'Opponent';
+            setConnectionStatus(`${leaver} left. Refunded.`); 
+            setTimeout(() => { if (onRequeue) onRequeue(); else if (onQuit) onQuit(); }, 2000);
           }
           else if (data.type === 'OPPONENT_UPDATE') {
             setOpponentScore(data.score);
           } 
           else if (data.type === 'OPPONENT_FORFEIT') {
-    setWon(true);
-    setIsDraw(false);
-    setWaitingForResult(false); 
-    setIsForfeit(true); // ✅ Set the forfeit flag
-    if(data.leaver_name) setOpponentName(data.leaver_name); // ✅ Set leaver's name
-    
-    handleGameOver(true); 
-}
-else if (data.type === 'MATCH_ABORTED') {
-    clearInterval(readyInterval);
-    const leaver = data.leaver_name || 'Opponent';
-    setConnectionStatus(`${leaver} left. Refunded.`); // ✅ Show leaver name
-    setTimeout(() => { if (onRequeue) onRequeue(); else if (onQuit) onQuit(); }, 2000);
-}
+            setWon(true);
+            setIsDraw(false);
+            setWaitingForResult(false); 
+            setIsForfeit(true); 
+            if(data.leaver_name) setOpponentName(data.leaver_name); 
+            handleGameOver(true); 
+          }
           else if (data.type === 'RESULT') {
-            // --- 2. STOP WAITING WHEN RESULT ARRIVES ---
             setWaitingForResult(false);
-
             if (data.winner === "DRAW") {
                 setIsDraw(true);
                 setWon(false);
@@ -176,7 +165,6 @@ else if (data.type === 'MATCH_ABORTED') {
     }
   }, [mode, socket]);
 
-  // ... (Keep existing Helper Functions: generatePositions, etc.) ...
   useEffect(() => {
       const savedHighScore = parseInt(localStorage.getItem('highScore')) || 0;
       const tutorialSeen = localStorage.getItem('tutorialSeen') === 'true';
@@ -196,6 +184,7 @@ else if (data.type === 'MATCH_ABORTED') {
       if (settings.vibration && typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(pattern);
   };
   
+  // --- UPDATED GENERATION LOGIC ---
   const generatePositions = useCallback((count) => {
       const newPositions = [];
       for (let i = 0; i < count; i++) {
@@ -203,7 +192,11 @@ else if (data.type === 'MATCH_ABORTED') {
         while (overlaps && attempts < 200) {
           attempts++;
           const left = 10 + Math.random() * 80; 
-          const top = 15 + Math.random() * 70;
+          
+          // 🛑 CHANGED: Now uses 5% to 85% of the CONTAINER height (not the screen)
+          // Since the container starts below the navbar, 0% is already "safe".
+          const top = 5 + Math.random() * 80; 
+
           const hasCollision = newPositions.some(pos => {
             const dx = pos.left - left;
             const dy = (pos.top - top) * 1.5; 
@@ -261,7 +254,7 @@ else if (data.type === 'MATCH_ABORTED') {
         } else {
           clearInterval(countdownIntervalRef.current);
           setShowRoundScreen(false);
-  
+          // Logic for online/offline numbers generation
           if (mode === 'online' && serverRoundsRef.current) {
             const roundData = serverRoundsRef.current[roundNum - 1]; 
             if (roundData) {
@@ -314,7 +307,7 @@ else if (data.type === 'MATCH_ABORTED') {
       setRoundTimer(10); 
       setIsPaused(false);
       setGameState('idle'); 
-      setWaitingForResult(false); // Reset Waiting State
+      setWaitingForResult(false); 
       startRound(1);
       if (settings.music && !document.hidden) bgMusicInstance?.play().catch(() => {});
   }, [mode, startRound, clearAllTimers, showTutorial, settings.music]);
@@ -339,16 +332,13 @@ else if (data.type === 'MATCH_ABORTED') {
     }
   };
 
-  // 👇 UPDATE THE FUNCTION SIGNATURE to accept isForfeit
   const handleGameOver = (isForfeit = false) => {
     setRoundTimer(0);
     clearAllTimers(); 
     setError(true);
     setGameState('gameover');
     
-    // 👇 WRAP THIS LOGIC
     if (mode === 'online' && socket) {
-      // Only show "Waiting..." if it wasn't a forfeit
       if (!isForfeit) {
           setWaitingForResult(true);
       }
@@ -358,7 +348,6 @@ else if (data.type === 'MATCH_ABORTED') {
     if (settings.sfx && !document.hidden) gameOverAudioRef.current?.play().catch(()=>{});
   };
 
-  // ... (Keep existing handleClick, resetGameData, shareScore) ...
   const resetGameData = () => {
       if (confirm("Reset high score?")) {
           localStorage.clear();
@@ -436,7 +425,7 @@ else if (data.type === 'MATCH_ABORTED') {
         if (mode === 'online' && socket) socket.send(JSON.stringify({ type: 'GAME_OVER', finalScore: score }));
         
         setTimeout(() => {
-          handleGameOver(); // Use common handler
+          handleGameOver(); 
           if(settings.sfx && !document.hidden) gameOverAudioRef.current?.play();
         }, 500);
       }
@@ -452,48 +441,21 @@ else if (data.type === 'MATCH_ABORTED') {
       <audio ref={winAudioRef} src="/win.wav" preload="auto" />
       <audio ref={startSoundRef} src="/start.wav" />
 
-      {/* --- HUD --- */}
-      <div className="absolute top-0 left-0 w-full p-4 flex justify-between items-start z-50 pointer-events-none">
-        <div className="flex flex-col gap-2 pointer-events-auto">
-          <div className="bg-white/90 backdrop-blur-md border border-slate-100 px-4 py-2 rounded-2xl shadow-sm flex items-center gap-3">
-            <Trophy size={18} className="text-yellow-500" />
-            <div>
-              <span className="text-[10px] font-bold text-slate-400 uppercase block tracking-wider">Score</span>
-              <span className="font-black text-slate-800 text-lg leading-none">{score}</span>
-            </div>
-          </div>
-          {mode === 'online' && (
-            <div className="bg-white/90 backdrop-blur-md border border-slate-100 px-4 py-2 rounded-2xl shadow-sm flex items-center gap-3">
-              <Users size={18} className="text-red-400" />
-              <div>
-                {/* --- 4. USE REAL OPPONENT NAME --- */}
-                <span className="text-[10px] font-bold text-slate-400 uppercase block tracking-wider truncate max-w-[80px]">{opponentName}</span>
-                <span className="font-black text-slate-600 text-sm leading-none">{opponentScore}</span>
-              </div>
-            </div>
-          )}
-          {mode === 'offline' && (
-            <div className="bg-white/50 backdrop-blur-sm px-3 py-1 rounded-xl text-[10px] font-bold text-slate-400 uppercase tracking-widest border border-slate-100">
-              Best: {highScore}
-            </div>
-          )}
-        </div>
-
-        <div className="pointer-events-auto absolute left-1/2 -translate-x-1/2 top-4">
-          <div className={`bg-white/90 backdrop-blur-xl border border-slate-100 px-6 py-3 rounded-2xl shadow-lg transition-all duration-300 ${roundTimer <= 3 ? 'border-red-200 shadow-red-100 animate-pulse' : ''}`}>
-            <span className={`font-mono text-3xl font-black ${roundTimer <= 3 ? 'text-red-500' : 'text-slate-800'}`}>{roundTimer}</span>
-          </div>
-        </div>
-
-        {mode === 'offline' && (
-          <button onClick={togglePause} className="bg-white/90 backdrop-blur-md border border-slate-100 p-3 rounded-2xl shadow-sm hover:text-emerald-500 transition-colors pointer-events-auto active:scale-90">
-            <div className="space-y-1"><div className="w-5 h-0.5 bg-slate-400 rounded-full"></div><div className="w-5 h-0.5 bg-slate-400 rounded-full"></div></div>
-          </button>
-        )}
-      </div>
+      {/* --- REPLACED HUD WITH NAVBAR COMPONENT --- */}
+      <GameNavbar 
+        score={score}
+        mode={mode}
+        opponentName={opponentName}
+        opponentScore={opponentScore}
+        highScore={highScore}
+        roundTimer={roundTimer}
+        onTogglePause={togglePause}
+      />
 
       {/* --- PLAY AREA --- */}
-      <div className="absolute inset-0 pt-20">
+      {/* 🛑 CHANGED: added top-[120px] and removed pt-20. 
+          This forces the bubble container to start BELOW the navbar. */}
+      <div className="absolute left-0 right-0 bottom-0 top-[120px]">
         {numbers.map((num, i) => {
           const isClicked = clickedNumbers.includes(num);
           const isCorrect = correctNumbers.includes(num);
@@ -522,7 +484,7 @@ else if (data.type === 'MATCH_ABORTED') {
       </div>
 
       {/* --- OVERLAYS --- */}
-      {/* 1. START SCREEN (STRICTLY OFFLINE ONLY) */}
+      {/* 1. START SCREEN */}
       {gameState === 'idle' && mode === 'offline' && !showTutorial && !showRoundScreen && (
         <div className="absolute inset-0 bg-white/60 backdrop-blur-lg flex flex-col items-center justify-center z-50 px-4">
           <div className="bg-white border border-slate-100 p-10 rounded-[3rem] shadow-2xl text-center max-w-sm w-full">
@@ -574,52 +536,45 @@ else if (data.type === 'MATCH_ABORTED') {
         </div>
       )}
 
-      {/* 4. GAME OVER (UPDATED) */}
+      {/* 4. GAME OVER */}
       {gameState === 'gameover' && (
         <div className="absolute inset-0 bg-white/80 backdrop-blur-lg flex items-center justify-center z-[100] p-6">
           <div className="bg-white border border-slate-100 rounded-[3rem] p-10 max-w-sm w-full shadow-2xl text-center">
-            
-            {/* --- 5. CONDITIONAL VIEW: WAITING vs RESULT --- */}
             {waitingForResult ? (
                <div className="py-10 animate-pulse">
                   <div className="w-20 h-20 rounded-3xl bg-slate-100 flex items-center justify-center mx-auto mb-6 shadow-sm">
                      <Clock size={40} className="text-slate-400" />
                   </div>
-                  <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight mb-2">
-                     Wait...
-                  </h2>
+                  <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight mb-2">Wait...</h2>
                   <p className="text-slate-500 text-xs font-bold px-4">
                      <span className="text-emerald-500">{opponentName}</span> is still playing.
                   </p>
                </div>
             ) : (
-               /* --- NORMAL RESULT VIEW --- */
                <>
-  <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg 
-    ${isDraw ? 'bg-amber-100 text-amber-600' : (won ? 'bg-emerald-100 text-emerald-600' : 'bg-red-50 text-red-500')}
-  `}>
-    {isDraw ? <MinusCircle size={40} /> : (won ? <Trophy size={40} /> : <X size={40} />)}
-  </div>
-  
-  <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter mb-2">
-    {isDraw ? "Match Draw" : (won ? "Victory!" : "Defeat")}
-  </h2>
+                <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg 
+                  ${isDraw ? 'bg-amber-100 text-amber-600' : (won ? 'bg-emerald-100 text-emerald-600' : 'bg-red-50 text-red-500')}
+                `}>
+                  {isDraw ? <MinusCircle size={40} /> : (won ? <Trophy size={40} /> : <X size={40} />)}
+                </div>
+                
+                <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter mb-2">
+                  {isDraw ? "Match Draw" : (won ? "Victory!" : "Defeat")}
+                </h2>
 
-  {/* ✅ ADD THIS BLOCK BELOW THE TITLE */}
-  {isForfeit && (
-    <p className="text-emerald-500 text-[10px] font-black uppercase tracking-widest mb-4 animate-bounce">
-       {opponentName} fled the match!
-    </p>
-  )}
-  
-  {mode === 'online' && (
-    <p className={`text-xs font-black uppercase tracking-widest mb-6 
-      ${isDraw ? 'text-amber-500' : (won ? 'text-emerald-500' : 'text-red-400')}
-    `}>
-      {/* 💰 Update logic to 90/10 as requested earlier */}
-      {isDraw ? 'Entry Fee Refunded' : (won ? 'Profit: +90 PKR' : 'Loss: -50 PKR')}
-    </p>
-  )}
+                {isForfeit && (
+                  <p className="text-emerald-500 text-[10px] font-black uppercase tracking-widest mb-4 animate-bounce">
+                     {opponentName} fled the match!
+                  </p>
+                )}
+                
+                {mode === 'online' && (
+                  <p className={`text-xs font-black uppercase tracking-widest mb-6 
+                    ${isDraw ? 'text-amber-500' : (won ? 'text-emerald-500' : 'text-red-400')}
+                  `}>
+                    {isDraw ? 'Entry Fee Refunded' : (won ? 'Profit: +90 PKR' : 'Loss: -50 PKR')}
+                  </p>
+                )}
 
                 <div className="flex justify-center gap-8 my-8 pb-8 border-b border-slate-50">
                   <div className="text-center">

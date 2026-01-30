@@ -43,21 +43,24 @@ def send_otp_email(target_email: str, code: str):
     msg['To'] = target_email
 
     try:
-        # 1. Use smtplib.SMTP (NOT SMTP_SSL) and port 587
-        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=15)
+        # 1. Connect using standard SMTP (not SMTP_SSL) on Port 587
+        # We add a timeout to prevent the app from hanging if the network is slow
+        server = smtplib.SMTP("smtp.gmail.com", 587, timeout=15)
         
-        # 2. Put the connection into TLS mode
+        # 2. Start the TLS security (The 'STARTTLS' command)
         server.starttls() 
         
-        # 3. Login and send
+        # 3. Login and send using your settings
         server.login(settings.EMAIL_USER, settings.EMAIL_PASS)
         server.send_message(msg)
+        
+        # 4. Close the connection gracefully
         server.quit()
         
         print(f"✅ OTP successfully sent to {target_email}")
             
     except Exception as e:
-        # This will now give us a better error if 587 also fails
+        # This will print the exact reason to your Render logs if it fails again
         print(f"❌ SMTP Error Detail: {type(e).__name__} - {e}")
 # --- Endpoints ---
 
