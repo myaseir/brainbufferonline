@@ -35,6 +35,11 @@ async def cleanup_otp(email: str, delay: int = 600):
         del pending_users[email]
 
 # --- Helper: Email Sender ---
+import smtplib
+from email.message import EmailMessage
+# Import your settings instance
+# from app.core.config import settings 
+
 def send_otp_email(target_email: str, code: str):
     msg = EmailMessage()
     msg.set_content(f"Welcome to BrainBuffer! Your verification code is: {code}\n\nThis code will expire in 10 minutes.")
@@ -43,24 +48,26 @@ def send_otp_email(target_email: str, code: str):
     msg['To'] = target_email
 
     try:
-        # 1. Connect using standard SMTP (not SMTP_SSL) on Port 587
-        # We add a timeout to prevent the app from hanging if the network is slow
-        server = smtplib.SMTP("smtp.gmail.com", 587, timeout=15)
+        # 1. Use standard SMTP (not SMTP_SSL) on Port 587
+        # Port 587 is the industry standard for hosted apps
+        server = smtplib.SMTP(settings.MAIL_SERVER, settings.MAIL_PORT, timeout=15)
         
-        # 2. Start the TLS security (The 'STARTTLS' command)
+        # 2. Start the TLS security (Crucial for Port 587)
         server.starttls() 
         
-        # 3. Login and send using your settings
+        # 3. Login using your settings
         server.login(settings.EMAIL_USER, settings.EMAIL_PASS)
+        
+        # 4. Send the message
         server.send_message(msg)
         
-        # 4. Close the connection gracefully
+        # 5. Close the connection
         server.quit()
         
         print(f"✅ OTP successfully sent to {target_email}")
             
     except Exception as e:
-        # This will print the exact reason to your Render logs if it fails again
+        # This will catch and log why the connection failed
         print(f"❌ SMTP Error Detail: {type(e).__name__} - {e}")
 # --- Endpoints ---
 
