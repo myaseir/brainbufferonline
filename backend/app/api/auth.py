@@ -3,18 +3,15 @@ import smtplib
 import asyncio
 from email.message import EmailMessage
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, status
-from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, EmailStr
 from app.services.auth_service import AuthService
-from app.core.security import create_access_token, decode_access_token # ✅ Added decode_access_token
-
+from app.core.security import create_access_token
+from app.core.deps import get_current_user  # ✅ Corrected Import
+from app.core.config import settings
 router = APIRouter()
 auth_service = AuthService()
 
-# --- OAuth2 Scheme (Required for 'Depends') ---
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
-
-# Temporary in-memory store for OTPs and user data
+# Temporary in-memory store for OTPs
 pending_users = {}
 
 # --- Pydantic Models ---
@@ -35,7 +32,6 @@ class VerifyRequest(BaseModel):
 async def cleanup_otp(email: str, delay: int = 600):
     await asyncio.sleep(delay)
     if email in pending_users:
-        print(f"OTP Expired: Removing {email} from memory.")
         del pending_users[email]
 
 # --- Helper: Email Sender ---
@@ -43,57 +39,42 @@ def send_otp_email(target_email: str, code: str):
     msg = EmailMessage()
     msg.set_content(f"Welcome to BrainBuffer! Your verification code is: {code}\n\nThis code will expire in 10 minutes.")
     msg['Subject'] = 'Verify Your BrainBuffer Account'
-    msg['From'] = "techglacia@gmail.com"
+    # ✅ Use settings for 'From'
+    msg['From'] = settings.EMAIL_USER 
     msg['To'] = target_email
 
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-            smtp.login("techglacia@gmail.com", "veyrigopokjsckhw")
+            # ✅ Use settings for login credentials
+            smtp.login(settings.EMAIL_USER, settings.EMAIL_PASS)
             smtp.send_message(msg)
+            print(f"✅ OTP successfully sent to {target_email}")
     except Exception as e:
-        print(f"SMTP Error: {e}")
-
-# --- Helper: Get Current User ID (Dependency) ---
-async def get_current_user_id(token: str = Depends(oauth2_scheme)):
-    payload = decode_access_token(token)
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return payload.get("sub")
+        # Improved error logging to help you debug
+        print(f"❌ SMTP Error: {type(e).__name__} - {e}")
 
 # --- Endpoints ---
 
 @router.get("/me")
-async def get_current_user_details(user_id: str = Depends(get_current_user_id)):
+async def get_current_user_details(user: dict = Depends(get_current_user)):
     """
-    Fetches the current authenticated user's fresh data (Balance, etc.)
+    Fetches the current authenticated user's fresh data from the DB.
+    The 'user' dict is provided by the get_current_user dependency.
     """
-    user = await auth_service.get_user_by_id(user_id) # Ensure this method exists in AuthService or use repo directly
-    # If AuthService doesn't expose get_user_by_id, use auth_service.repo.get_by_id(user_id)
-    
-    # Fallback if auth_service wrapper is missing, assuming auth_service has a repo:
-    if not user and hasattr(auth_service, 'user_repo'):
-         user = await auth_service.user_repo.get_by_id(user_id)
-
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Return fresh details (Safe filtering)
     return {
-        "username": user["username"],
-        "email": user["email"],
+        "username": user.get("username"),
+        "email": user.get("email"),
         "wallet_balance": user.get("wallet_balance", 0),
-        "user_id": str(user["_id"])
+        "user_id": str(user.get("_id")),
+        "total_wins": user.get("total_wins", 0),
+        # ✅ ADD THESE TWO LINES BELOW
+        "total_matches": user.get("total_matches", 0),
+        "recent_matches": user.get("recent_matches", []), 
+        "rank": user.get("rank", "Elite")
     }
 
 @router.post("/login")
 async def login(data: LoginRequest):
-    """
-    Handles user login, validates credentials, and issues a JWT token.
-    """
     user = await auth_service.validate_user(data.email, data.password)
     
     if not user:
@@ -102,7 +83,6 @@ async def login(data: LoginRequest):
             detail="Invalid email or password"
         )
     
-    # ✅ Create JWT Token
     access_token = create_access_token(data={
         "sub": str(user["_id"]),
         "email": user["email"],

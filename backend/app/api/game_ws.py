@@ -11,17 +11,14 @@ from bson import ObjectId
 from app.core.config import settings
 from app.core.security import decode_access_token
 from app.repositories.user_repo import UserRepository
+from app.core.store import connected_matchmaking_users, active_matches, user_locks
 
 router = APIRouter()
 logger = logging.getLogger("uvicorn.error")
 user_repo = UserRepository()
 
-# --- 🧠 IN-MEMORY STATE ---
-connected_matchmaking_users: Set[str] = set()
-user_locks: Set[str] = set()
 match_queue: asyncio.Queue = asyncio.Queue()
 pairings: Dict[str, str] = {} 
-active_matches: Dict[str, dict] = {}
 
 # --- 🎮 FAIR GAME GENERATOR ---
 def generate_fair_game(total_rounds=20):
@@ -55,8 +52,10 @@ def generate_fair_game(total_rounds=20):
 async def get_user_from_token(token: str) -> Optional[str]:
     try:
         payload = decode_access_token(token)
-        return payload.get("sub") if payload else None
-    except:
+        if not payload: return None
+        return payload.get("sub")
+    except Exception as e:
+        print(f"❌ Token Validation Error: {str(e)}")
         return None
 
 async def acquire_user_lock(user_id: str) -> bool:
@@ -65,25 +64,20 @@ async def acquire_user_lock(user_id: str) -> bool:
     return True
 
 async def release_user_lock(user_id: str):
-    if user_id in user_locks: 
-        user_locks.discard(user_id)
+    user_locks.discard(user_id)
 
 async def find_or_enqueue_match(user_id: str):
     while not match_queue.empty():
         waiting_user = await match_queue.get()
         if waiting_user == user_id: continue
-        if waiting_user not in connected_matchmaking_users:
-            print(f"♻️ Skipping stale user {waiting_user} from queue.")
-            continue
-            
+        if waiting_user not in connected_matchmaking_users: continue 
+        
         match_id = f"match_{uuid.uuid4().hex[:8]}"
         pairings[user_id] = match_id
         pairings[waiting_user] = match_id
-        print(f"✨ MATCH FOUND: {match_id} | {user_id} vs {waiting_user}")
         return match_id
 
     await match_queue.put(user_id)
-    print(f"🕒 User {user_id} added to queue. (Queue Size: {match_queue.qsize()})")
     return None
 
 # --- 📡 MATCHMAKING ENDPOINT ---
@@ -92,10 +86,12 @@ async def matchmaking_endpoint(websocket: WebSocket, token: str = Query(...)):
     await websocket.accept()
     user_id = await get_user_from_token(token)
 
-    if user_id in user_locks: await release_user_lock(user_id)
+    if not user_id:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
 
-    if not user_id or not await acquire_user_lock(user_id):
-        print("❌ Matchmaking connection rejected: Locked")
+    if user_id in user_locks: await release_user_lock(user_id)
+    if not await acquire_user_lock(user_id):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
@@ -122,209 +118,175 @@ async def matchmaking_endpoint(websocket: WebSocket, token: str = Query(...)):
                 await websocket.send_json({"status": "TIMEOUT"})
                 await websocket.close()
 
-    except WebSocketDisconnect:
-        print(f"👋 Matchmaking: User {user_id} disconnected")
     except Exception as e:
-        print(f"❌ Matchmaking Error: {e}")
+        print(f"⚠️ Matchmaking Exception: {e}")
     finally:
-        if user_id in connected_matchmaking_users: connected_matchmaking_users.remove(user_id)
+        connected_matchmaking_users.discard(user_id)
         await release_user_lock(user_id)
 
 # --- ⚡ GAME LOGIC ENDPOINT ---
 @router.websocket("/ws/match/{match_id}")
 async def game_websocket_endpoint(websocket: WebSocket, match_id: str, token: str = Query(...)):
     await websocket.accept()
+    user_id = await get_user_from_token(token)
     
-    user_id = None
+    if not user_id:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     try:
-        user_id = await get_user_from_token(token)
-        if not user_id:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
-
-        # Safe DB Check
-        try:
-            db_id = user_id
-            try:
-                if isinstance(user_id, str) and ObjectId.is_valid(user_id): db_id = ObjectId(user_id)
-            except: pass 
-
-            user = await user_repo.get_by_id(db_id) 
-            if not user or user.get("wallet_balance", 0) < 10:
-                print(f"❌ User {user_id} Rejected: Low Balance")
-                await websocket.send_json({"type": "ERROR", "message": "Insufficient Balance"})
-                await websocket.close()
-                return
-
-            await user_repo.update_wallet(user_id, -10.0)
-            print(f"💰 Entry fee deducted for {user_id}")
-
-        except Exception as db_err:
-            print(f"❌ DB Error: {db_err}")
-            await websocket.close()
-            return
-
         if match_id not in active_matches:
             active_matches[match_id] = {
                 "players": {},
+                "usernames": {},
+                "charged_players": set(),
                 "rounds": generate_fair_game(20),
                 "scores": {},
                 "ready": set(),
                 "finished": set(),
-                "is_active": True  # <--- Flag to prevent double processing
+                "is_active": True
             }
         
         match = active_matches[match_id]
+        
+        if user_id not in match["charged_players"]:
+            user = await user_repo.get_by_id(user_id)
+            if not user or user.get("wallet_balance", 0) < 50:
+                await websocket.send_json({"type": "ERROR", "message": "Insufficient Balance"})
+                await websocket.close()
+                return
+
+            await user_repo.update_wallet(user_id, -50.0)
+            match["charged_players"].add(user_id)
+            match["usernames"][user_id] = user.get("username", "Unknown")
+
         match["players"][user_id] = websocket
         match["scores"][user_id] = 0
-
-        print(f"✅ Connected: {user_id} in {match_id}")
 
         while True:
             data = await websocket.receive_text()
             msg = json.loads(data)
             
-            # 1. READY
             if msg.get("type") == "CLIENT_READY":
                 match["ready"].add(user_id)
-                
                 if len(match["ready"]) == 2:
-                     print(f"🏁 ALL READY. BROADCASTING START for {match_id}")
-                     
-                     # --- A. FETCH REAL USERNAMES ---
-                     usernames = {}
-                     for uid in match["players"].keys():
-                         db_id = uid
-                         try:
-                             if isinstance(uid, str) and ObjectId.is_valid(uid): db_id = ObjectId(uid)
-                         except: pass
-                         
-                         user_obj = await user_repo.get_by_id(db_id)
-                         usernames[uid] = user_obj["username"] if user_obj else "Opponent"
-
-                     # --- B. SEND START WITH OPPONENT NAME ---
-                     for uid, ws in match["players"].items():
-                         # Find the OTHER player's ID
-                         other_ids = [p for p in match["players"] if p != uid]
-                         opponent_name = "Opponent"
-                         if other_ids:
-                             opponent_name = usernames.get(other_ids[0], "Opponent")
-                         
-                         start_payload = {
-                             "type": "MATCH_START",
-                             "gameData": {"rounds": match["rounds"]},
-                             "opponent": opponent_name # <--- Send Name
-                         }
-                         await ws.send_json(start_payload)
-                         
-            # 2. SCORE
+                    for uid, ws in match["players"].items():
+                        other_ids = [p for p in match["players"] if p != uid]
+                        opp_name = match["usernames"].get(other_ids[0], "Opponent") if other_ids else "Opponent"
+                        await ws.send_json({
+                            "type": "MATCH_START", 
+                            "gameData": {"rounds": match["rounds"]}, 
+                            "opponent": opp_name
+                        })
+                          
             elif msg.get("type") == "SCORE_UPDATE":
                 match["scores"][user_id] = msg.get("score", 0)
                 for pid, ws in match["players"].items():
                     if pid != user_id:
                         await ws.send_json({"type": "OPPONENT_UPDATE", "score": msg.get("score")})
 
-            # 3. GAME OVER
             elif msg.get("type") == "GAME_OVER":
                 match["scores"][user_id] = msg.get("finalScore", match["scores"][user_id])
                 match["finished"].add(user_id)
-                
                 if len(match["finished"]) == 2:
                     await determine_winner(match_id)
-                    match["is_active"] = False # Mark as DONE
-                    break # Break loop to allow disconnect without error
+                    break 
 
     except WebSocketDisconnect:
-        # Check if match exists AND is still active
         if match_id in active_matches:
             match = active_matches[match_id]
-            
-            # SKIP if game is already over (Normal disconnect after result)
-            if not match["is_active"]: 
-                pass
-            else:
-                print(f"🔌 Abnormal Disconnect: {user_id}")
-                
-                # Check if game had actually started
+            if match["is_active"]:
                 game_was_running = len(match["ready"]) == 2
-                
                 remaining = [p for p in match["players"] if p != user_id]
+                leaver_name = match["usernames"].get(user_id, "Opponent")
+
                 if remaining:
                     survivor = remaining[0]
+                    survivor_name = match["usernames"].get(survivor, "Survivor")
+                    now = datetime.now(timezone.utc)
+
                     if game_was_running:
-                        # Real Forfeit
-                        print(f"🏆 Forfeit Win for {survivor}")
-                        await user_repo.update_wallet(survivor, 20.0)
-                        await user_repo.increment_wins(survivor)
+                        # 🏆 Win by forfeit
+                        await user_repo.update_wallet(survivor, 90.0)
+                        await user_repo.record_match_stats(survivor, is_win=True)
+                        
+                        # Save History for Survivor
+                        await user_repo.add_match_to_history(survivor, {
+                            "opponent": leaver_name, "result": "WIN", "payout": 90, "date": now
+                        })
+                        # Save History for Leaver
+                        await user_repo.add_match_to_history(user_id, {
+                            "opponent": survivor_name, "result": "LOSS", "payout": 0, "date": now
+                        })
+
                         try:
-                            await match["players"][survivor].send_json({"type": "OPPONENT_FORFEIT", "winner": survivor})
+                            await match["players"][survivor].send_json({
+                                "type": "OPPONENT_FORFEIT", 
+                                "winner": survivor,
+                                "leaver_name": leaver_name
+                            })
+                            await match["players"][survivor].close()
                         except: pass
                     else:
-                        # Premature
-                        print(f"⚠️ Match Aborted. Refunding {survivor}.")
-                        await user_repo.update_wallet(survivor, 10.0) 
+                        # Match aborted before start - Refund
+                        await user_repo.update_wallet(survivor, 50.0)
                         try:
-                            await match["players"][survivor].send_json({"type": "MATCH_ABORTED", "message": "Opponent disconnected."})
+                            await match["players"][survivor].send_json({"type": "MATCH_ABORTED", "message": f"{leaver_name} left."})
+                            await match["players"][survivor].close()
                         except: pass
                 
-                # Clean up immediately on abnormal disconnect
                 active_matches.pop(match_id, None)
-
-    except Exception as e:
-        print(f"❌ Crash: {e}")
     finally:
         if user_id: await release_user_lock(user_id)
 
 async def determine_winner(match_id):
     if match_id not in active_matches: return
     match = active_matches[match_id]
-    
-    # Mark as inactive so disconnects don't trigger forfeit
     match["is_active"] = False 
     
     players = list(match["players"].keys())
-    if len(players) != 2: return
+    if len(players) != 2: 
+        active_matches.pop(match_id, None)
+        return
 
     p1, p2 = players[0], players[1]
     s1, s2 = match["scores"].get(p1, 0), match["scores"].get(p2, 0)
+    u1_name, u2_name = match["usernames"].get(p1, "Opponent"), match["usernames"].get(p2, "Opponent")
     
-    res_winner = "DRAW"
-    winner_id, loser_id = None, None
+    now = datetime.now(timezone.utc)
+    res_status = "DRAW"
 
     if s1 > s2:
-        winner_id, loser_id = p1, p2
-        res_winner = str(p1)
-        await user_repo.update_wallet(p1, 20.0)
-        await user_repo.increment_wins(p1)
+        # P1 Wins
+        await user_repo.update_wallet(p1, 90.0)
+        await user_repo.record_match_stats(p1, is_win=True)
+        await user_repo.add_match_to_history(p1, {"opponent": u2_name, "result": "WIN", "payout": 90, "date": now})
+        
+        await user_repo.record_match_stats(p2, is_win=False)
+        await user_repo.add_match_to_history(p2, {"opponent": u1_name, "result": "LOSS", "payout": 0, "date": now})
+        res_status = str(p1)
     elif s2 > s1:
-        winner_id, loser_id = p2, p1
-        res_winner = str(p2)
-        await user_repo.update_wallet(p2, 20.0)
-        await user_repo.increment_wins(p2)
+        # P2 Wins
+        await user_repo.update_wallet(p2, 90.0)
+        await user_repo.record_match_stats(p2, is_win=True)
+        await user_repo.add_match_to_history(p2, {"opponent": u1_name, "result": "WIN", "payout": 90, "date": now})
+        
+        await user_repo.record_match_stats(p1, is_win=False)
+        await user_repo.add_match_to_history(p1, {"opponent": u2_name, "result": "LOSS", "payout": 0, "date": now})
+        res_status = str(p2)
     else:
-        await user_repo.update_wallet(p1, 10.0)
-        await user_repo.update_wallet(p2, 10.0)
+        # Draw - Refund both and record history
+        for pid in [p1, p2]:
+            opp = u2_name if pid == p1 else u1_name
+            await user_repo.update_wallet(pid, 50.0)
+            await user_repo.record_match_stats(pid, is_win=False) # Only total_matches++
+            await user_repo.add_match_to_history(pid, {"opponent": opp, "result": "DRAW", "payout": 50, "date": now})
 
-    print(f"📢 Result: {res_winner}")
-    
-    # Broadcast & Close
+    # Broadcast Results
     for ws in match["players"].values():
         try:
-            await ws.send_json({"type": "RESULT", "winner": res_winner, "scores": match["scores"]})
-            await ws.close() # Force disconnect
+            await ws.send_json({"type": "RESULT", "winner": res_status, "scores": match["scores"]})
+            await ws.close()
         except: pass
-
-    # Log
-    try:
-        db = user_repo.collection.database
-        await db["match_history"].insert_one({
-            "match_id": match_id,
-            "winner_id": ObjectId(winner_id) if winner_id else "DRAW",
-            "loser_id": ObjectId(loser_id) if loser_id else "DRAW",
-            "scores": match["scores"],
-            "timestamp": datetime.now(timezone.utc),
-            "mode": "online_ranked"
-        })
-    except Exception as e: print(f"DB Error: {e}")
-
-    if match_id in active_matches: del active_matches[match_id]
+    
+    active_matches.pop(match_id, None)

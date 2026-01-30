@@ -31,7 +31,7 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
   // --- NEW STATES FOR UI ---
   const [opponentName, setOpponentName] = useState('Opponent'); 
   const [waitingForResult, setWaitingForResult] = useState(false);
-
+const [isForfeit, setIsForfeit] = useState(false); // Track if the win was via forfeit
   const [numbers, setNumbers] = useState([]);
   const [positions, setPositions] = useState([]);
   const [score, setScore] = useState(0);
@@ -135,13 +135,20 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
             setOpponentScore(data.score);
           } 
           else if (data.type === 'OPPONENT_FORFEIT') {
-            setWon(true);
-            setIsDraw(false);
-            setWaitingForResult(false); 
-            
-            // 👇 UPDATE THIS LINE (Pass 'true')
-            handleGameOver(true); 
-          }
+    setWon(true);
+    setIsDraw(false);
+    setWaitingForResult(false); 
+    setIsForfeit(true); // ✅ Set the forfeit flag
+    if(data.leaver_name) setOpponentName(data.leaver_name); // ✅ Set leaver's name
+    
+    handleGameOver(true); 
+}
+else if (data.type === 'MATCH_ABORTED') {
+    clearInterval(readyInterval);
+    const leaver = data.leaver_name || 'Opponent';
+    setConnectionStatus(`${leaver} left. Refunded.`); // ✅ Show leaver name
+    setTimeout(() => { if (onRequeue) onRequeue(); else if (onQuit) onQuit(); }, 2000);
+}
           else if (data.type === 'RESULT') {
             // --- 2. STOP WAITING WHEN RESULT ARRIVES ---
             setWaitingForResult(false);
@@ -588,22 +595,31 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
             ) : (
                /* --- NORMAL RESULT VIEW --- */
                <>
-                <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg 
-                  ${isDraw ? 'bg-amber-100 text-amber-600' : (won ? 'bg-emerald-100 text-emerald-600' : 'bg-red-50 text-red-500')}
-                `}>
-                  {isDraw ? <MinusCircle size={40} /> : (won ? <Trophy size={40} /> : <X size={40} />)}
-                </div>
-                <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter mb-2">
-                  {isDraw ? "Match Draw" : (won ? "Victory!" : "Defeat")}
-                </h2>
-                
-                {mode === 'online' && (
-                  <p className={`text-xs font-black uppercase tracking-widest mb-6 
-                    ${isDraw ? 'text-amber-500' : (won ? 'text-emerald-500' : 'text-red-400')}
-                  `}>
-                    {isDraw ? 'Entry Fee Refunded' : (won ? 'Profit: +20 PKR' : 'Loss: -10 PKR')}
-                  </p>
-                )}
+  <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg 
+    ${isDraw ? 'bg-amber-100 text-amber-600' : (won ? 'bg-emerald-100 text-emerald-600' : 'bg-red-50 text-red-500')}
+  `}>
+    {isDraw ? <MinusCircle size={40} /> : (won ? <Trophy size={40} /> : <X size={40} />)}
+  </div>
+  
+  <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter mb-2">
+    {isDraw ? "Match Draw" : (won ? "Victory!" : "Defeat")}
+  </h2>
+
+  {/* ✅ ADD THIS BLOCK BELOW THE TITLE */}
+  {isForfeit && (
+    <p className="text-emerald-500 text-[10px] font-black uppercase tracking-widest mb-4 animate-bounce">
+       {opponentName} fled the match!
+    </p>
+  )}
+  
+  {mode === 'online' && (
+    <p className={`text-xs font-black uppercase tracking-widest mb-6 
+      ${isDraw ? 'text-amber-500' : (won ? 'text-emerald-500' : 'text-red-400')}
+    `}>
+      {/* 💰 Update logic to 90/10 as requested earlier */}
+      {isDraw ? 'Entry Fee Refunded' : (won ? 'Profit: +90 PKR' : 'Loss: -50 PKR')}
+    </p>
+  )}
 
                 <div className="flex justify-center gap-8 my-8 pb-8 border-b border-slate-50">
                   <div className="text-center">

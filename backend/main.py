@@ -3,65 +3,63 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.mongodb import connect_to_mongo, close_mongo_connection
 from app.api import auth, wallet, game_ws, leaderboard, admin 
-# Import the shared dictionary to check connections
 from app.api.game_ws import active_matches
+import logging
+import os
 
-# --- 🚀 LIFESPAN MANAGER ---
+# --- 📝 LOGGING SETUP ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("uvicorn.error")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. STARTUP
-    print("🚀 Glacia Connection Starting...")
+    # Startup
+    logger.info("🚀 Glacia Connection: Initializing...")
     await connect_to_mongo()
     yield
-    
-    # 2. SHUTDOWN & CLEANUP
-    print("🛑 Glacia Connection Shutting Down...")
-    
-    # Gracefully close active Game WebSockets
+    # Shutdown logic
     if active_matches:
-        # We create a list of items to avoid "dictionary changed size during iteration" errors
         for match_id, match_data in list(active_matches.items()):
             players = match_data.get("players", {})
-            for ws in players.values():
+            for ws in list(players.values()):
                 try:
-                    await ws.send_json({
-                        "type": "SERVER_SHUTDOWN", 
-                        "message": "Server restarting for updates. Please refresh."
-                    })
+                    await ws.send_json({"type": "SERVER_SHUTDOWN", "message": "Refund issued."})
                     await ws.close()
-                except Exception:
-                    pass
-                    
+                except: pass
     await close_mongo_connection()
 
-app = FastAPI(
-    title="Glacia Connection - Brain Buffer Backend",
-    lifespan=lifespan
-)
+app = FastAPI(title="Glacia Backend", version="1.2.2", lifespan=lifespan)
 
-# --- 🌍 CORS CONFIGURATION (UPDATED FOR PRODUCTION) ---
+# Define all allowed origins
+origins = [
+    "http://localhost:3000",      # Standard Next.js
+    "http://127.0.0.1:3000",
+    
+    # 👇 ADD THESE LINES FOR PORT 3001
+    "http://localhost:3001",      # Backup Next.js port
+    "http://127.0.0.1:3001",
+    
+    "https://your-production-app.vercel.app", 
+]
+
 app.add_middleware(
     CORSMiddleware,
-    # 👇 CHANGE THIS to ["*"] to allow Vercel/Any frontend to connect
-    allow_origins=["*"], 
+    allow_origins=origins, 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- 🛣️ ROUTERS ---
+# --- 🛣️ ROUTER REGISTRATION ---
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
-app.include_router(wallet.router, prefix="/api/wallet", tags=["Wallet"])
+
+# This prefix ensures all wallet/admin routes start with /api/wallet
+app.include_router(wallet.router, prefix="/api/wallet", tags=["Wallet-System"])
+
 app.include_router(game_ws.router, prefix="/api/game", tags=["Game"])
 app.include_router(leaderboard.router, prefix="/api/leaderboard", tags=["Leaderboard"])
-app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
+app.include_router(admin.router, prefix="/api/admin", tags=["System-Admin"])
 
 @app.get("/")
 def read_root():
-    return {
-        "status": "Glacia Connection Live",
-        "version": "1.0.0",
-        "environment": "Production", # Updated label
-        "owner": "Glacia Connection",
-        "developer": "Muhammad Yasir"
-    }
+    return {"status": "Online", "version": "1.2.2"}

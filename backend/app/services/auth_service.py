@@ -9,17 +9,31 @@ class AuthService:
         """Finds a user by email via the repository."""
         return await self.repo.get_by_email(email)
 
-    async def validate_user(self, email, password):
+    async def validate_user(self, identifier: str, password: str):
         """
         Validates user credentials for login.
+        Supports checking by email OR username.
         Returns user data if successful, None otherwise.
         """
-        user = await self.repo.get_by_email(email)
+        # 1. Search by email first (standard repo method)
+        user = await self.repo.get_by_email(identifier)
+        
+        # 2. If not found by email, try searching by username
+        if not user:
+            user = await self.repo.get_by_username(identifier)
+            
         if not user:
             return None
         
-        # Check if the plain password matches the hashed password in DB
-        if not verify_password(password, user["password"]):
+        # 3. Robust Password Check:
+        # Check for 'hashed_password' (New format) OR 'password' (Old format)
+        # We use .get() to return None instead of crashing if key is missing
+        stored_hash = user.get("hashed_password") or user.get("password")
+        
+        if not stored_hash:
+            return None # No password found in DB record
+            
+        if not verify_password(password, stored_hash): 
             return None
             
         return user
@@ -37,9 +51,11 @@ class AuthService:
         new_user = {
             "username": username,
             "email": email,
-            "password": get_password_hash(password),
-            "wallet_balance": 50.0,  # 🎁 Welcome bonus for testing
-            "total_wins": 0
+            # ✅ Save as 'hashed_password' to match new standard
+            "hashed_password": get_password_hash(password),
+            "wallet_balance": 50.0,  # 🎁 Welcome bonus
+            "total_wins": 0,
+            "role": "user" # Default role
         }
         
         # 3. Save to DB

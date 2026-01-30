@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from 'react';
 import Auth from './components/Auth';
-import Dashboard from './components/Dashboard';
+import Dashboard from './components/Dashboard/page';
 import BubbleGame from './components/Bubble'; 
 
 export default function Home() {
@@ -10,63 +10,78 @@ export default function Home() {
   const [matchSocket, setMatchSocket] = useState(null);
   const [gameMode, setGameMode] = useState('offline');
   
-  // Track the matchmaking socket so we can kill it on Cancel
   const matchmakingSocketRef = useRef(null);
 
-  useEffect(() => {
+  // --- 📡 FETCH FRESH USER DATA ---
+  const fetchUserData = async () => {
     const token = localStorage.getItem('token');
-    const username = localStorage.getItem('username');
-    const balance = localStorage.getItem('wallet_balance');
-    
-    if (token && username) {
-      setUser({ username, token, wallet_balance: balance || 0 });
-      setView('dashboard');
-    } else {
+    if (!token) {
       setView('auth');
+      return;
     }
-  }, []);
 
-  const startOfflineGame = () => {
-    setGameMode('offline');
-    setMatchSocket(null);
-    setView('playing');
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`, {
+        method: 'GET',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (res.ok) {
+        const freshUser = await res.json();
+        setUser(freshUser);
+        localStorage.setItem('username', freshUser.username);
+        localStorage.setItem('wallet_balance', freshUser.wallet_balance);
+        setView('dashboard');
+      } else if (res.status === 401) {
+        localStorage.removeItem('token');
+        setView('auth');
+      }
+    } catch (err) {
+      console.error("Fetch Error:", err);
+      const cachedUsername = localStorage.getItem('username');
+      if (cachedUsername) {
+        setUser({ username: cachedUsername, token, wallet_balance: localStorage.getItem('wallet_balance') || 0 });
+        setView('dashboard');
+      } else {
+        setView('auth');
+      }
+    }
   };
 
+  useEffect(() => {
+    fetchUserData();
+  }, []);
+
+  // --- 🔍 MATCHMAKING LOGIC ---
   const startOnlineMatch = () => {
     const token = localStorage.getItem('token');
     if (!token) return setView('auth');
 
-    // 1. Set View
     setView('searching');
     
-    // 2. Safety Cleanup: Close any existing ghost connection
     if (matchmakingSocketRef.current) {
         matchmakingSocketRef.current.onmessage = null; 
         matchmakingSocketRef.current.close();
     }
 
-    // 3. Prepare WebSocket URL (Handle http -> ws and https -> wss)
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
-    const WS_URL = API_URL.replace(/^http/, 'ws'); // Automatically switches http->ws or https->wss
+    const WS_URL = API_URL.replace(/^http/, 'ws'); 
 
-    // 4. Open New Connection
     const mmWs = new WebSocket(`${WS_URL}/api/game/ws/matchmaking?token=${token}`);
     matchmakingSocketRef.current = mmWs;
 
     mmWs.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      
       if (data.status === "MATCH_FOUND") {
-        // Match found! Connect to the specific game ID
         const gameSocket = new WebSocket(`${WS_URL}/api/game/ws/match/${data.match_id}?token=${token}`);
         setMatchSocket(gameSocket);
         setGameMode('online');
         setView('playing');
-        
-        // Close the matchmaking queue socket
         mmWs.close();
       }
-      
       if (data.status === "TIMEOUT") {
         alert("No opponent found. Try again!");
         setView('dashboard');
@@ -75,18 +90,15 @@ export default function Home() {
     };
 
     mmWs.onerror = () => {
-      // Only alert if the connection wasn't intentionally closed
-      if (mmWs.readyState !== WebSocket.CLOSED) {
-         // alert("Connection Error. Is the server running?"); 
-         setView('dashboard');
-      }
+      if (mmWs.readyState !== WebSocket.CLOSED) setView('dashboard');
     };
   };
 
+  // ✅ RESTORED CANCEL SEARCH FUNCTION
   const cancelSearch = () => {
     if (matchmakingSocketRef.current) {
-        matchmakingSocketRef.current.onmessage = null; // Stop listening
-        matchmakingSocketRef.current.close(); // Kill connection
+        matchmakingSocketRef.current.onmessage = null; 
+        matchmakingSocketRef.current.close();
     }
     setView('dashboard');
   };
@@ -94,7 +106,6 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#fcfdfd] select-none text-slate-800">
       
-      {/* Loading Spinner */}
       {view === 'loading' && (
         <div className="flex items-center justify-center h-screen">
           <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
@@ -102,36 +113,34 @@ export default function Home() {
       )}
 
       {view === 'auth' && (
-        <Auth onLoginSuccess={(u) => { setUser(u); setView('dashboard'); }} />
+        <Auth onLoginSuccess={(response) => { 
+          // Extract token whether it's top-level or nested
+          const token = response.access_token || (response.user && response.user.access_token);
+          if (token) {
+            localStorage.setItem('token', token);
+            setTimeout(() => fetchUserData(), 50); 
+          } else {
+            console.error("Auth Failure: No token found", response);
+            alert("Session could not be established.");
+          }
+        }} />
       )}
 
       {view === 'dashboard' && (
         <Dashboard 
           user={user} 
           onStartGame={startOnlineMatch} 
-          onStartOffline={startOfflineGame} 
-          onLogout={() => { localStorage.clear(); setView('auth'); }} 
+          onStartOffline={() => { setGameMode('offline'); setMatchSocket(null); setView('playing'); }} 
+          onLogout={() => { localStorage.clear(); setUser(null); setView('auth'); }} 
         />
       )}
 
-      {/* Searching Screen */}
       {view === 'searching' && (
-        <div className="flex flex-col items-center justify-center h-screen bg-[#fcfdfd] animate-in fade-in duration-500">
-          <div className="relative mb-10">
-            <div className="w-16 h-16 border-4 border-slate-100 border-t-emerald-500 rounded-full animate-spin"></div>
-          </div>
-          <div className="text-center">
-            <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">
-              Match<span className="text-emerald-500">Making</span>
-            </h2>
-            <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mt-2">
-              Searching for Opponent...
-            </p>
-          </div>
-          <button 
-            onClick={cancelSearch} 
-            className="mt-16 px-10 py-4 bg-white text-slate-400 rounded-2xl text-[10px] font-black hover:text-red-500 transition-all uppercase tracking-widest shadow-lg border border-slate-100 active:scale-95"
-          >
+        <div className="flex flex-col items-center justify-center h-screen bg-[#fcfdfd]">
+          <div className="w-16 h-16 border-4 border-slate-100 border-t-emerald-500 rounded-full animate-spin mb-10"></div>
+          <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">MatchMaking</h2>
+          <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-2">Searching...</p>
+          <button onClick={cancelSearch} className="mt-16 px-10 py-4 bg-white text-slate-400 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg border border-slate-100 active:scale-95">
             Cancel Search
           </button>
         </div>
@@ -141,25 +150,11 @@ export default function Home() {
         <BubbleGame 
           mode={gameMode} 
           socket={matchSocket} 
-          
-          // 1. Play Again Button (Summary Screen)
-          onRestart={() => {
-            if(matchSocket) matchSocket.close();
-            setMatchSocket(null);
-            startOnlineMatch();
-          }}
-
-          // 2. Auto-Requeue (If opponent leaves early)
-          onRequeue={() => {
-            if(matchSocket) matchSocket.close();
-            setMatchSocket(null);
-            startOnlineMatch(); 
-          }}
-          
-          // 3. Quit Button (Summary Screen)
-          onQuit={() => {
-            if(matchSocket) matchSocket.close();
-            setView('dashboard');
+          onRestart={() => { if(matchSocket) matchSocket.close(); setMatchSocket(null); startOnlineMatch(); }}
+          onQuit={() => { 
+            if(matchSocket) matchSocket.close(); 
+            setMatchSocket(null); 
+            fetchUserData(); // Sync results
           }} 
         />
       )}

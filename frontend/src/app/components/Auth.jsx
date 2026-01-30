@@ -52,11 +52,10 @@ export default function Auth({ onLoginSuccess }) {
     }
   };
 
-  const handleLogin = async (e) => {
+ const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-     // 👇 Updated to use the Environment Variable
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -66,10 +65,13 @@ export default function Auth({ onLoginSuccess }) {
       const data = await res.json();
       
       if (res.ok) {
+        // ✅ SAVE THE TOKEN TO LOCAL STORAGE IMMEDIATELY
         localStorage.setItem('token', data.access_token);
         localStorage.setItem('username', data.user.username);
         localStorage.setItem('wallet_balance', data.user.wallet_balance);
-        onLoginSuccess(data.user);
+
+        // ✅ PASS THE WHOLE DATA OBJECT (so page.js sees access_token)
+        onLoginSuccess(data); 
       } else {
         alert(data.detail || "Login failed.");
       }
