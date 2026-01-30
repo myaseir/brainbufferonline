@@ -8,6 +8,8 @@ import { Target, Play, Zap, Crown, Trophy, X, DollarSign, UserCheck, Smartphone,
 export default function DashboardPage({ user, onStartGame, onStartOffline, onLogout }) {
   const [stats, setStats] = useState({ top_players: [], global_stats: { total_pool: 0 } });
   const [loading, setLoading] = useState(true);
+  
+  // UI States
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
@@ -30,13 +32,14 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
     finally { setLoading(false); }
   };
 
-const handleDeposit = async (e) => {
+  const handleDeposit = async (e) => {
     e.preventDefault();
+    if (!depositData.amount || Number(depositData.amount) <= 0) return alert("Please enter a valid amount");
+
     setIsSubmitting(true);
     const token = localStorage.getItem('token');
 
     try {
-      // 🔄 TRYING THE BRIDGE PATH (Matches main.py sequential priority)
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/wallet/deposit/submit`, {
         method: 'POST',
         headers: { 
@@ -67,13 +70,15 @@ const handleDeposit = async (e) => {
     }
   };
 
- const handleWithdraw = async (e) => {
+  const handleWithdraw = async (e) => {
     e.preventDefault();
     
     // Safety check: ensure user object exists before checking balance
     const currentBalance = user?.wallet_balance || 0;
+    const withdrawAmount = Number(withdrawData.amount);
     
-    if (Number(withdrawData.amount) > currentBalance) {
+    if (withdrawAmount <= 0) return alert("Please enter a valid amount");
+    if (withdrawAmount > currentBalance) {
         return alert(`Insufficient balance! You only have ${currentBalance} PKR.`);
     }
 
@@ -81,7 +86,6 @@ const handleDeposit = async (e) => {
     const token = localStorage.getItem('token');
 
     try {
-      // ✅ FIXED URL: Added "/wallet" to match main.py prefix
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/wallet/withdraw`, {
         method: 'POST',
         headers: { 
@@ -89,7 +93,7 @@ const handleDeposit = async (e) => {
           'Authorization': `Bearer ${token}` 
         },
         body: JSON.stringify({ 
-          amount: Number(withdrawData.amount), 
+          amount: withdrawAmount, 
           method: withdrawData.method, 
           account_number: withdrawData.accountNumber, 
           account_name: withdrawData.accountName 
@@ -99,6 +103,7 @@ const handleDeposit = async (e) => {
       if (res.ok) {
         alert("Withdrawal request sent!");
         setShowWithdrawModal(false);
+        // Ideally, call a parent function to refresh user data here instead of reload
         window.location.reload(); 
       } else { 
         const errorData = await res.json();
@@ -113,14 +118,16 @@ const handleDeposit = async (e) => {
 
   return (
     <div className="min-h-screen bg-[#fcfdfd] text-slate-800 p-4 md:p-8 relative">
-      {/* Toast Notification */}
+      
+      {/* Toast Notification - High Z-Index to appear over everything */}
       {showSuccessToast && (
-        <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[200] bg-slate-900 text-white px-6 py-4 rounded-3xl shadow-2xl flex items-center gap-4 animate-in fade-in slide-in-from-top-4">
-          <CheckCircle2 size={24} className="text-emerald-400" />
+        <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[200] bg-slate-900 text-white px-6 py-4 rounded-3xl shadow-2xl flex items-center gap-4 animate-in fade-in slide-in-from-top-4 w-[90%] max-w-sm">
+          <CheckCircle2 size={24} className="text-emerald-400 shrink-0" />
           <p className="text-xs font-black uppercase tracking-tight">Deposit submitted for verification!</p>
         </div>
       )}
 
+      {/* Main Content */}
       <div className="max-w-6xl mx-auto space-y-8 relative z-10">
         <Navbar 
           user={user} 
@@ -131,6 +138,7 @@ const handleDeposit = async (e) => {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <div className="lg:col-span-4 space-y-8">
+            {/* Battle Selection Card */}
             <div className="bg-white/90 backdrop-blur-xl border border-white rounded-[2.5rem] p-8 space-y-6 shadow-xl shadow-green-900/5">
               <div className="flex items-center gap-3 mb-2">
                 <Target className="text-green-500" size={20} />
@@ -156,6 +164,7 @@ const handleDeposit = async (e) => {
               </button>
             </div>
 
+            {/* Global Economy Card */}
             <div className="relative group overflow-hidden bg-white border border-white rounded-[2.5rem] p-8 shadow-xl shadow-green-900/5">
               <div className="relative z-10">
                 <div className="flex items-center gap-2 mb-4">
@@ -169,7 +178,6 @@ const handleDeposit = async (e) => {
               <div className="absolute -right-4 -bottom-4 opacity-[0.03] rotate-12 text-slate-900"><Trophy size={160} /></div>
             </div>
 
-            {/* ✅ ADDED RECENT MATCHES HERE */}
             <RecentMatches matches={user?.recent_matches} />
           </div>
 
@@ -190,21 +198,33 @@ const handleDeposit = async (e) => {
             </div>
             <div className="bg-slate-900 text-white p-5 rounded-3xl mb-6">
               <p className="text-[10px] font-bold text-slate-400 uppercase mb-2 tracking-widest">Bank Al Habib</p>
-              <p className="text-lg font-black tracking-widest">02910048003531010</p>
+              <p className="text-lg font-black tracking-widest break-all">02910048003531010</p>
               <p className="text-[10px] font-black text-emerald-500 uppercase mt-1">Muhammad Yasir</p>
             </div>
             <form onSubmit={handleDeposit} className="space-y-4">
-              <div className="relative"><DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} /><input type="number" required placeholder="Amount" value={depositData.amount} onChange={(e) => setDepositData({...depositData, amount: e.target.value})} className="w-full bg-slate-50 border-none pl-12 p-4 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-400 outline-none" /></div>
-              <div className="relative"><UserCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} /><input type="text" required placeholder="Your Account Name" value={depositData.fullName} onChange={(e) => setDepositData({...depositData, fullName: e.target.value})} className="w-full bg-slate-50 border-none pl-12 p-4 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-400 outline-none" /></div>
-              <div className="relative"><Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} /><input type="text" required placeholder="Your Phone Number" value={depositData.senderNumber} onChange={(e) => setDepositData({...depositData, senderNumber: e.target.value})} className="w-full bg-slate-50 border-none pl-12 p-4 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-400 outline-none" /></div>
-              <div className="relative"><Hash className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} /><input type="text" required placeholder="TRX ID" value={depositData.trxId} onChange={(e) => setDepositData({...depositData, trxId: e.target.value})} className="w-full bg-slate-50 border-none pl-12 p-4 rounded-2xl text-sm font-black focus:ring-2 focus:ring-emerald-400 outline-none" /></div>
+              <div className="relative">
+                <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
+                <input type="number" min="1" required placeholder="Amount" value={depositData.amount} onChange={(e) => setDepositData({...depositData, amount: e.target.value})} className="w-full bg-slate-50 border-none pl-12 p-4 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-400 outline-none" />
+              </div>
+              <div className="relative">
+                <UserCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
+                <input type="text" required placeholder="Your Account Name" value={depositData.fullName} onChange={(e) => setDepositData({...depositData, fullName: e.target.value})} className="w-full bg-slate-50 border-none pl-12 p-4 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-400 outline-none" />
+              </div>
+              <div className="relative">
+                <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
+                <input type="text" required placeholder="Your Phone Number" value={depositData.senderNumber} onChange={(e) => setDepositData({...depositData, senderNumber: e.target.value})} className="w-full bg-slate-50 border-none pl-12 p-4 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-400 outline-none" />
+              </div>
+              <div className="relative">
+                <Hash className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
+                <input type="text" required placeholder="TRX ID" value={depositData.trxId} onChange={(e) => setDepositData({...depositData, trxId: e.target.value})} className="w-full bg-slate-50 border-none pl-12 p-4 rounded-2xl text-sm font-black focus:ring-2 focus:ring-emerald-400 outline-none" />
+              </div>
               <button type="submit" disabled={isSubmitting} className="w-full bg-emerald-500 text-white p-5 rounded-3xl font-black uppercase text-xs hover:bg-emerald-600 disabled:opacity-50 transition-all shadow-lg shadow-emerald-100">{isSubmitting ? "Submitting..." : "Confirm Deposit"}</button>
             </form>
           </div>
         </div>
       )}
 
-      {/* ✅ ADDED WITHDRAWAL MODAL --- */}
+      {/* --- WITHDRAWAL MODAL --- */}
       {showWithdrawModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl relative">
@@ -214,7 +234,7 @@ const handleDeposit = async (e) => {
               <h2 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Withdrawal</h2>
             </div>
             <form onSubmit={handleWithdraw} className="space-y-4">
-              <input type="number" required placeholder="Amount (PKR)" value={withdrawData.amount} onChange={(e) => setWithdrawData({...withdrawData, amount: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-green-400 outline-none" />
+              <input type="number" min="1" required placeholder="Amount (PKR)" value={withdrawData.amount} onChange={(e) => setWithdrawData({...withdrawData, amount: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-green-400 outline-none" />
               <div className="grid grid-cols-2 gap-4">
                 {["Easypaisa", "JazzCash"].map((m) => (
                   <button key={m} type="button" onClick={() => setWithdrawData({...withdrawData, method: m})} className={`p-4 rounded-2xl text-[10px] font-black uppercase border-2 transition-all ${withdrawData.method === m ? "border-emerald-500 bg-emerald-50 text-emerald-600" : "border-slate-50 text-slate-300"}`}>{m}</button>

@@ -13,34 +13,48 @@ logger = logging.getLogger("uvicorn.error")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("🚀 Glacia Connection: Initializing...")
-    await connect_to_mongo()
+    # --- Startup Logic ---
+    logger.info("🚀 Glacia Connection: Initializing MongoDB...")
+    try:
+        await connect_to_mongo()
+        # If you use Redis for matchmaking, initialize it here
+        # await connect_to_redis() 
+        logger.info("✅ Database systems online.")
+    except Exception as e:
+        logger.error(f"❌ Startup Error: {e}")
+
     yield
-    # Shutdown logic
+
+    # --- Shutdown Logic ---
+    logger.info("⚠️ Server shutting down. Cleaning up active matches...")
     if active_matches:
         for match_id, match_data in list(active_matches.items()):
             players = match_data.get("players", {})
             for ws in list(players.values()):
                 try:
-                    await ws.send_json({"type": "SERVER_SHUTDOWN", "message": "Refund issued."})
+                    await ws.send_json({
+                        "type": "SERVER_SHUTDOWN", 
+                        "message": "Match terminated due to server maintenance. Stakes refunded."
+                    })
                     await ws.close()
-                except: pass
+                except: 
+                    pass
+    
     await close_mongo_connection()
+    logger.info("🛑 Glacia Connection: Offline.")
 
 app = FastAPI(title="Glacia Backend", version="1.2.2", lifespan=lifespan)
 
-# Define all allowed origins
+# --- 🔒 CORS SETUP (Production Ready) ---
 origins = [
-    "http://localhost:3000",      # Standard Next.js
+    "http://localhost:3000",
     "http://127.0.0.1:3000",
-    
-    # 👇 ADD THESE LINES FOR PORT 3001
-    "http://localhost:3001",      # Backup Next.js port
+    "http://localhost:3001",
     "http://127.0.0.1:3001",
-    
     "https://brainbufferonline.vercel.app", 
-    "https://admin-brainbuffer.vercel.app", 
+    "https://admin-brainbuffer.vercel.app",
+    # Render's own health check sometimes needs the actual domain
+    "https://brainbufferonline.onrender.com"
 ]
 
 app.add_middleware(
@@ -52,15 +66,25 @@ app.add_middleware(
 )
 
 # --- 🛣️ ROUTER REGISTRATION ---
+# Standard Auth
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 
-# This prefix ensures all wallet/admin routes start with /api/wallet
+# Wallet prefix matches your Frontend calls
 app.include_router(wallet.router, prefix="/api/wallet", tags=["Wallet-System"])
 
+# WebSocket routes for Game/Matchmaking
 app.include_router(game_ws.router, prefix="/api/game", tags=["Game"])
+
+# Public Stats
 app.include_router(leaderboard.router, prefix="/api/leaderboard", tags=["Leaderboard"])
+
+# Secure Admin
 app.include_router(admin.router, prefix="/api/admin", tags=["System-Admin"])
 
 @app.get("/")
 def read_root():
-    return {"status": "Online", "version": "1.2.2"}
+    return {
+        "status": "Online", 
+        "version": "1.2.2", 
+        "environment": os.getenv("RENDER", "local_development")
+    }

@@ -1,5 +1,5 @@
 import random
-import smtplib
+import resend
 import asyncio
 from email.message import EmailMessage
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, status
@@ -41,29 +41,39 @@ from email.message import EmailMessage
 # from app.core.config import settings 
 
 def send_otp_email(target_email: str, code: str):
-    msg = EmailMessage()
-    msg.set_content(f"Your code is: {code}")
-    msg['Subject'] = 'Verification'
-    msg['From'] = settings.EMAIL_USER
-    msg['To'] = target_email
+    """
+    Sends an OTP email using the Resend API.
+    Bypasses SMTP port blocking on hosting providers like Render.
+    """
+    # Initialize the Resend client with your API key
+    resend.api_key = settings.RESEND_API_KEY
 
     try:
-        # Force IPv4 to avoid Render IPv6 routing issues
-        # We use a timeout to catch the 'unreachable' error quickly
-        server = smtplib.SMTP("smtp.gmail.com", 587, timeout=20)
-        server.set_debuglevel(1) # This will show the full handshake in Render logs
-        
-        server.ehlo()
-        server.starttls() 
-        server.ehlo()
-        
-        server.login(settings.EMAIL_USER, settings.EMAIL_PASS)
-        server.send_message(msg)
-        server.quit()
-        print(f"✅ Email sent to {target_email}")
+        # Define the email parameters
+        params = {
+            # Use 'onboarding@resend.dev' if you haven't verified a custom domain yet
+            "from": "BrainBuffer <onboarding@resend.dev>",
+            "to": [target_email],
+            "subject": "Verify Your BrainBuffer Account",
+            "html": f"""
+                <div style="font-family: Arial, sans-serif; max-width: 400px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #f8fafc;">
+                    <h2 style="color: #1e293b; text-align: center;">Security Code</h2>
+                    <p style="color: #475569; text-align: center;">Enter the code below to verify your account:</p>
+                    <div style="background-color: #ffffff; border: 2px dashed #cbd5e1; border-radius: 8px; padding: 15px; margin: 20px 0; text-align: center;">
+                        <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #0f172a;">{code}</span>
+                    </div>
+                    <p style="font-size: 12px; color: #94a3b8; text-align: center;">This code will expire in 10 minutes.</p>
+                </div>
+            """
+        }
+
+        # Trigger the send via API
+        email_response = resend.Emails.send(params)
+        print(f"✅ OTP successfully sent via Resend API! ID: {email_response.get('id')}")
 
     except Exception as e:
-        print(f"❌ Still failing! Error: {e}")
+        # This will catch API errors (like invalid keys or unverified recipients)
+        print(f"❌ Resend API Error: {type(e).__name__} - {e}")
 # --- Endpoints ---
 
 @router.get("/me")
