@@ -42,32 +42,30 @@ from email.message import EmailMessage
 
 def send_otp_email(target_email: str, code: str):
     msg = EmailMessage()
-    msg.set_content(f"Welcome to BrainBuffer! Your verification code is: {code}\n\nThis code will expire in 10 minutes.")
-    msg['Subject'] = 'Verify Your BrainBuffer Account'
+    msg.set_content(f"Welcome to BrainBuffer! Your verification code is: {code}")
+    msg['Subject'] = 'Verify Your Account'
     msg['From'] = settings.EMAIL_USER 
     msg['To'] = target_email
 
     try:
-        # 1. Use standard SMTP (not SMTP_SSL) on Port 587
-        # Port 587 is the industry standard for hosted apps
-        server = smtplib.SMTP(settings.MAIL_SERVER, settings.MAIL_PORT, timeout=15)
+        # STEP 1: Use standard SMTP (NOT SMTP_SSL) on Port 587
+        server = smtplib.SMTP("smtp.gmail.com", 587, timeout=15)
         
-        # 2. Start the TLS security (Crucial for Port 587)
+        # STEP 2: Identify yourself to the server
+        server.ehlo()
+        
+        # STEP 3: Secure the connection (This makes it 587 compatible)
         server.starttls() 
         
-        # 3. Login using your settings
+        # STEP 4: Login and send
         server.login(settings.EMAIL_USER, settings.EMAIL_PASS)
-        
-        # 4. Send the message
         server.send_message(msg)
-        
-        # 5. Close the connection
         server.quit()
         
         print(f"✅ OTP successfully sent to {target_email}")
             
     except Exception as e:
-        # This will catch and log why the connection failed
+        # If this fails, the error will tell us if it's a login issue or a network issue
         print(f"❌ SMTP Error Detail: {type(e).__name__} - {e}")
 # --- Endpoints ---
 
