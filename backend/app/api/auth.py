@@ -43,26 +43,22 @@ def send_otp_email(target_email: str, code: str):
     msg['To'] = target_email
 
     try:
-        # 1. Use Port 587 (Standard for TLS on cloud servers like Render)
-        with smtplib.SMTP('smtp.gmail.com', 587, timeout=15) as smtp:
-            # 2. Identify ourselves to the server
-            smtp.ehlo()
-            # 3. Secure the connection with TLS
-            smtp.starttls()
-            # 4. Re-identify as a secure connection
-            smtp.ehlo()
+        # 1. Use smtplib.SMTP (NOT SMTP_SSL) and port 587
+        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=15)
+        
+        # 2. Put the connection into TLS mode
+        server.starttls() 
+        
+        # 3. Login and send
+        server.login(settings.EMAIL_USER, settings.EMAIL_PASS)
+        server.send_message(msg)
+        server.quit()
+        
+        print(f"✅ OTP successfully sent to {target_email}")
             
-            # 5. Login using settings
-            smtp.login(settings.EMAIL_USER, settings.EMAIL_PASS)
-            smtp.send_message(msg)
-            print(f"✅ OTP successfully sent to {target_email}")
-            
-    except smtplib.SMTPAuthenticationError:
-        print("❌ SMTP Error: Authentication failed. Check your App Password on Render env vars.")
     except Exception as e:
-        # This will show up in your Render "Logs" tab
+        # This will now give us a better error if 587 also fails
         print(f"❌ SMTP Error Detail: {type(e).__name__} - {e}")
-
 # --- Endpoints ---
 
 @router.get("/me")
