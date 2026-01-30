@@ -39,7 +39,8 @@ origins = [
     "http://localhost:3001",      # Backup Next.js port
     "http://127.0.0.1:3001",
     
-    "https://your-production-app.vercel.app", 
+    "https://brainbufferonline.vercel.app", 
+    "https://admin-brainbuffer.vercel.app", 
 ]
 
 app.add_middleware(
