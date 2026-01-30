@@ -39,19 +39,29 @@ def send_otp_email(target_email: str, code: str):
     msg = EmailMessage()
     msg.set_content(f"Welcome to BrainBuffer! Your verification code is: {code}\n\nThis code will expire in 10 minutes.")
     msg['Subject'] = 'Verify Your BrainBuffer Account'
-    # ✅ Use settings for 'From'
     msg['From'] = settings.EMAIL_USER 
     msg['To'] = target_email
 
     try:
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-            # ✅ Use settings for login credentials
+        # 1. Use Port 587 (Standard for TLS on cloud servers like Render)
+        with smtplib.SMTP('smtp.gmail.com', 587, timeout=15) as smtp:
+            # 2. Identify ourselves to the server
+            smtp.ehlo()
+            # 3. Secure the connection with TLS
+            smtp.starttls()
+            # 4. Re-identify as a secure connection
+            smtp.ehlo()
+            
+            # 5. Login using settings
             smtp.login(settings.EMAIL_USER, settings.EMAIL_PASS)
             smtp.send_message(msg)
             print(f"✅ OTP successfully sent to {target_email}")
+            
+    except smtplib.SMTPAuthenticationError:
+        print("❌ SMTP Error: Authentication failed. Check your App Password on Render env vars.")
     except Exception as e:
-        # Improved error logging to help you debug
-        print(f"❌ SMTP Error: {type(e).__name__} - {e}")
+        # This will show up in your Render "Logs" tab
+        print(f"❌ SMTP Error Detail: {type(e).__name__} - {e}")
 
 # --- Endpoints ---
 
