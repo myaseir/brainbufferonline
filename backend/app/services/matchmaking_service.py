@@ -1,10 +1,14 @@
 import uuid
 import json
+import logging
 from datetime import datetime, timezone
 from fastapi import HTTPException
 from app.repositories.match_repo import MatchRepository
 from app.repositories.user_repo import UserRepository
 from app.db.redis import redis_client
+
+# Set up logging to catch those Upstash errors
+logger = logging.getLogger("uvicorn.error")
 
 class MatchmakingService:
     def __init__(self):
@@ -17,65 +21,95 @@ class MatchmakingService:
         if not user or user.get("wallet_balance", 0) < 50:
             raise HTTPException(status_code=400, detail="Insufficient funds")
 
-        # 2. 🕵️ Check if user is already in the pool
-        # Using a List (LPOP/RPUSH) is more reliable for queues than a Set (SPOP)
-        is_in_pool = redis_client.sismember("matchmaking_pool", user_id)
-        if is_in_pool:
-            return {"status": "WAITING", "user_id": user_id}
+        try:
+            # 2. 🕵️ Check if user is already in the pool
+            is_in_pool = redis_client.sismember("matchmaking_pool", user_id)
+            if is_in_pool:
+                return {"status": "WAITING", "user_id": user_id}
 
-        # 3. 🎲 Try to find an opponent
-        opponent_id = redis_client.spop("matchmaking_pool")
+            # 3. 🎲 Try to find an opponent
+            opponent_id = redis_client.spop("matchmaking_pool")
 
-        if opponent_id:
-            if isinstance(opponent_id, bytes):
-                opponent_id = opponent_id.decode('utf-8')
+            if opponent_id:
+                if isinstance(opponent_id, bytes):
+                    opponent_id = opponent_id.decode('utf-8')
 
-            # --- 🤝 MATCH FOUND! ---
-            if opponent_id == str(user_id):
-                redis_client.sadd("matchmaking_pool", user_id)
-                return {"status": "WAITING"}
+                # Handle self-match edge case
+                if opponent_id == str(user_id):
+                    redis_client.sadd("matchmaking_pool", user_id)
+                    return {"status": "WAITING"}
 
-            # --- ✅ SUCCESS: CREATE THE MATCH ---
-            match_id = f"match_{uuid.uuid4().hex[:8]}"
-            
-            # Deduct fee from the player who JUST joined to trigger the match
-            await self.user_repo.update_wallet(user_id, -50.0)
+                # --- ✅ MATCH FOUND: DEDUCT & CREATE ---
+                # We deduct here because we are sure a match is starting
+                await self.user_repo.update_wallet(user_id, -50.0)
+                
+                match_id = f"match_{uuid.uuid4().hex[:8]}"
+                await self.match_repo.create_match_record(match_id, opponent_id, user_id, 50.0)
+                
+                # Notify the opponent who was already waiting
+                redis_client.set(f"notify:{opponent_id}", match_id, ex=30)
+                
+                return {
+                    "status": "MATCHED",
+                    "match_id": match_id,
+                    "opponent_id": opponent_id,
+                    "entry_fee": 50.0
+                }
 
-            # Create record in MongoDB
-            await self.match_repo.create_match_record(match_id, opponent_id, user_id, 50.0)
-            
-            # 🚀 SYNC FIX: Use the 'notify:' prefix to match your WebSocket loop
-            # This is why you were likely stuck—the WebSocket was looking for 'notify:'
-            # while this file was setting 'match_notif:'
-            redis_client.set(f"notify:{opponent_id}", match_id, ex=30)
-            
-            return {
-                "status": "MATCHED",
-                "match_id": match_id,
-                "opponent_id": opponent_id,
-                "entry_fee": 50.0
-            }
+            else:
+                # --- ⏳ JOIN THE POOL ---
+                # We deduct upfront to "lock" the player in
+                await self.user_repo.update_wallet(user_id, -50.0)
+                
+                # Critical: If this Redis call fails, we must refund immediately!
+                try:
+                    redis_client.sadd("matchmaking_pool", user_id)
+                except Exception as redis_err:
+                    logger.error(f"Redis sadd failed: {redis_err}")
+                    await self.user_repo.update_wallet(user_id, 50.0) # REFUND
+                    raise HTTPException(status_code=500, detail="Matchmaking server busy. Funds refunded.")
 
-        else:
-            # --- ⏳ JOIN THE POOL ---
-            # Deduct upfront to "lock" the player in
-            await self.user_repo.update_wallet(user_id, -50.0)
-            redis_client.sadd("matchmaking_pool", user_id)
-            
-            return {"status": "WAITING", "user_id": user_id}
+                return {"status": "WAITING", "user_id": user_id}
+
+        except Exception as e:
+            logger.error(f"Matchmaking Error: {str(e)}")
+            # If we reach here and it's a Redis 'WRONGPASS' error, 
+            # the HTTPException will prevent the money from being lost 
+            # IF the error happened before update_wallet.
+            raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
 
     async def check_notif(self, user_id: str):
-        """Helper for HTTP polling if not using WebSockets for everything."""
-        notif = redis_client.get(f"notify:{user_id}")
-        if notif:
-            redis_client.delete(f"notify:{user_id}")
-            return notif.decode() if isinstance(notif, bytes) else notif
+        try:
+            notif = redis_client.get(f"notify:{user_id}")
+            if notif:
+                redis_client.delete(f"notify:{user_id}")
+                return notif.decode() if isinstance(notif, bytes) else notif
+        except Exception as e:
+            logger.error(f"Notification check failed: {e}")
         return None
 
     async def cancel_matchmaking(self, user_id: str):
-        """Refunds the user and removes them from the pool."""
-        removed = redis_client.srem("matchmaking_pool", user_id)
-        if removed:
-            # Refund the 50 PKR locked during join
-            await self.user_repo.update_wallet(user_id, 50.0)
-        return {"status": "cancelled"}
+        """Removes user from pool and refunds the 50 PKR."""
+        try:
+            # Atomic removal attempt
+            removed = redis_client.srem("matchmaking_pool", user_id)
+            
+            if removed:
+                # ONLY refund if they were successfully taken out of the pool
+                await self.user_repo.update_wallet(user_id, 50.0)
+                logger.info(f"✅ User {user_id} cancelled and was refunded 50 PKR.")
+                return {"status": "cancelled", "refunded": True}
+            else:
+                # If NOT in pool, they might already be in a match
+                notif = redis_client.get(f"notify:{user_id}")
+                if notif:
+                    return {"status": "error", "message": "Match already started. Cannot cancel."}
+                
+                return {"status": "not_in_pool", "refunded": False}
+
+        except Exception as e:
+            logger.error(f"Cancel Matchmaking Redis Error: {e}")
+            # If Redis is down (WRONGPASS), we can't verify if they are in the pool.
+            # To be safe, we don't refund blindly to avoid infinite money glitches,
+            # but we tell the user there is a connection issue.
+            raise HTTPException(status_code=500, detail="Service unavailable. Could not verify refund.")
