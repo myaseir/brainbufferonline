@@ -1,14 +1,17 @@
 "use client";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   Trophy, Wallet, Play, LogOut, TrendingUp, History, 
   User, Zap, Target, Crown, Clock, ArrowUpRight, X, 
-  PlusCircle, CheckCircle2, Smartphone, Hash, UserCheck, Banknote, DollarSign 
+  PlusCircle, CheckCircle2, Smartphone, Hash, UserCheck, Banknote, DollarSign, Lock 
 } from 'lucide-react';
 
 export default function Dashboard({ user, onStartGame, onStartOffline, onLogout }) {
   const [stats, setStats] = useState({ top_players: [], global_stats: { total_pool: 0 } });
   const [loading, setLoading] = useState(true);
+  
+  // 🚀 FIX: State Sync Problem - Maintain local user state for instant UI updates
+  const [localUser, setLocalUser] = useState(user);
 
   // --- 🔔 UI & MODAL STATES ---
   const [showSuccessToast, setShowSuccessToast] = useState(false);
@@ -27,33 +30,76 @@ export default function Dashboard({ user, onStartGame, onStartOffline, onLogout 
   const [trxId, setTrxId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/leaderboard/stats`);
-        const data = await res.json();
-        setStats(data);
-      } catch (err) { console.error(err); } 
-      finally { setLoading(false); }
-    };
-    fetchStats();
-  }, []);
+  // 🚀 FIX: Code Cleanup - Replace reload with smooth state refresh
+  const refreshUser = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return onLogout();
+
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const freshData = await res.json();
+        setLocalUser(freshData);
+      } else if (res.status === 401) {
+        onLogout();
+      }
+    } catch (err) {
+      console.error("User refresh failed", err);
+    }
+  }, [onLogout]);
+
+ // 1. Sync local user data ONLY when the user object changes
+useEffect(() => {
+  if (user) {
+    setLocalUser(user);
+  }
+}, [user]); 
+
+// 2. Fetch Leaderboard stats ONLY once when the dashboard loads
+useEffect(() => {
+  const fetchStats = async () => {
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/leaderboard/stats`);
+      const data = await res.json();
+      setStats(data);
+    } catch (err) { 
+      console.error("Leaderboard fetch failed", err); 
+    } finally { 
+      setLoading(false); 
+    }
+  };
+
+  fetchStats();
+
+  // OPTIONAL: Refresh stats every 60 seconds to keep it live without spamming
+  const interval = setInterval(fetchStats, 60000); 
+  return () => clearInterval(interval);
+  
+}, []); // 👈 IMPORTANT: Empty array [] means this runs ONCE on mount
+
+  // 🚀 FIX: Missing "Insufficient Funds" Protection Logic
+  const canPlayRanked = (localUser?.wallet_balance || 0) >= 50;
 
   const handleDeposit = async (e) => {
     e.preventDefault();
+    const token = localStorage.getItem('token');
+    if (!token) return onLogout();
+
     setIsSubmitting(true);
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/wallet/deposit/submit`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json', 
-          'Authorization': `Bearer ${localStorage.getItem('token')}` 
+          'Authorization': `Bearer ${token}` 
         },
         body: JSON.stringify({ 
           full_name: fullName, 
           sender_number: senderNumber, 
-          amount: Number(depositAmount), // Ensure this is a number
-          trx_id: trxId.trim()           // Clean whitespace
+          amount: Number(depositAmount),
+          trx_id: trxId.trim()
         })
       });
 
@@ -73,14 +119,18 @@ export default function Dashboard({ user, onStartGame, onStartOffline, onLogout 
 
   const handleWithdraw = async (e) => {
     e.preventDefault();
-    if (Number(withdrawAmount) > user.wallet_balance) return alert("Insufficient balance!");
+    const token = localStorage.getItem('token');
+    if (!token) return onLogout();
+
+    if (Number(withdrawAmount) > localUser.wallet_balance) return alert("Insufficient balance!");
+    
     setIsSubmitting(true);
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/wallet/withdraw`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json', 
-          'Authorization': `Bearer ${localStorage.getItem('token')}` 
+          'Authorization': `Bearer ${token}` 
         },
         body: JSON.stringify({ 
           amount: Number(withdrawAmount), 
@@ -92,8 +142,12 @@ export default function Dashboard({ user, onStartGame, onStartOffline, onLogout 
       if (res.ok) {
         alert("Withdrawal request sent!");
         setShowWithdrawModal(false);
-        window.location.reload();
-      } else { alert("Withdrawal failed."); }
+        // 🚀 FIX: Refresh instead of reload
+        await refreshUser();
+      } else { 
+        const errorData = await res.json();
+        alert(errorData.detail || "Withdrawal failed."); 
+      }
     } catch (err) { alert("Error connecting to server"); }
     finally { setIsSubmitting(false); }
   };
@@ -127,7 +181,7 @@ export default function Dashboard({ user, onStartGame, onStartOffline, onLogout 
               <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-green-400 border-4 border-white rounded-full"></div>
             </div>
             <div>
-              <h1 className="text-2xl font-black tracking-tight text-slate-900 uppercase">{user?.username || 'Commander'}</h1>
+              <h1 className="text-2xl font-black tracking-tight text-slate-900 uppercase">{localUser?.username || 'Commander'}</h1>
               <div className="flex items-center gap-2 mt-1">
                 <span className="bg-green-50 text-green-600 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border border-green-100">Rank: Elite</span>
                 <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">• Pakistan Server</span>
@@ -139,10 +193,9 @@ export default function Dashboard({ user, onStartGame, onStartOffline, onLogout 
             <div className="flex flex-col items-end px-6 border-r border-slate-100">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Wallet Balance</span>
               <div className="flex items-center gap-3">
-                <span className="text-2xl font-black text-slate-900 tabular-nums">{user?.wallet_balance || 0}</span>
+                <span className="text-2xl font-black text-slate-900 tabular-nums">{localUser?.wallet_balance || 0}</span>
                 <span className="text-xs font-bold text-green-500 uppercase mr-4">PKR</span>
                 
-                {/* --- DEPOSIT & WITHDRAWAL BUTTONS --- */}
                 <div className="flex gap-2">
                   <button 
                     onClick={() => setShowDepositModal(true)} 
@@ -170,15 +223,33 @@ export default function Dashboard({ user, onStartGame, onStartOffline, onLogout 
                 <Target className="text-green-500" size={20} />
                 <h2 className="text-sm font-black uppercase tracking-[0.3em] text-slate-400">Battle Selection</h2>
               </div>
-              <button onClick={onStartGame} className="w-full group relative overflow-hidden bg-gradient-to-r from-green-400 to-emerald-400 p-6 rounded-3xl transition-all hover:scale-[1.02] active:scale-95 shadow-lg shadow-emerald-200">
+
+              {/* 🚀 FIX: Missing "Insufficient Funds" Protection UI */}
+              <button 
+                onClick={canPlayRanked ? onStartGame : () => setShowDepositModal(true)} 
+                className={`w-full group relative overflow-hidden p-6 rounded-3xl transition-all shadow-lg 
+                  ${canPlayRanked 
+                    ? "bg-gradient-to-r from-green-400 to-emerald-400 hover:scale-[1.02] active:scale-95 shadow-emerald-200" 
+                    : "bg-slate-100 grayscale cursor-pointer hover:bg-slate-200 shadow-none"
+                  }`}
+              >
                 <div className="relative z-10 flex flex-col items-center gap-3">
-                  <Play className="fill-white text-white translate-x-1" size={32} />
+                  {canPlayRanked ? (
+                    <Play className="fill-white text-white translate-x-1" size={32} />
+                  ) : (
+                    <Lock className="text-slate-500" size={32} />
+                  )}
                   <div className="text-center">
-                    <span className="block text-xl font-black text-white uppercase tracking-tighter">Ranked Match</span>
-                    <span className="text-[10px] font-bold text-white uppercase tracking-widest opacity-90">Win 90 PKR • Entry 50 PKR</span>
+                    <span className={`block text-xl font-black uppercase tracking-tighter ${canPlayRanked ? 'text-white' : 'text-slate-600'}`}>
+                      {canPlayRanked ? "Ranked Match" : "Top Up Wallet"}
+                    </span>
+                    <span className={`text-[10px] font-bold uppercase tracking-widest ${canPlayRanked ? 'text-white opacity-90' : 'text-slate-500'}`}>
+                      {canPlayRanked ? "Win 90 PKR • Entry 50 PKR" : "Insufficient Funds to Play"}
+                    </span>
                   </div>
                 </div>
               </button>
+
               <button onClick={onStartOffline} className="w-full bg-white hover:bg-slate-50 border border-slate-100 p-6 rounded-3xl transition-all flex items-center justify-between group shadow-sm">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-green-50 rounded-2xl flex items-center justify-center text-green-400 group-hover:text-green-600 transition-colors"><Zap size={24} /></div>

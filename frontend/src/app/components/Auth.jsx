@@ -31,19 +31,22 @@ export default function Auth({ onLoginSuccess }) {
     if (!formData.email.includes('@')) return alert("Please enter a valid email.");
     setLoading(true);
     try {
-      // 👇 Updated to use the Environment Variable
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/signup/request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+            email: formData.email.trim().toLowerCase(),
+            password: formData.password,
+            username: formData.username.trim()
+        }),
       });
 
+      const data = await res.json();
       if (res.ok) {
         setStep('otp');
         setResendTimer(60); 
       } else {
-        const errorData = await res.json();
-        alert(errorData.detail || "Action failed.");
+        alert(data.detail || "Action failed.");
       }
     } catch (err) {
       alert("Backend server connection failed.");
@@ -52,25 +55,24 @@ export default function Auth({ onLoginSuccess }) {
     }
   };
 
- const handleLogin = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: formData.email, password: formData.password }),
+        body: JSON.stringify({ 
+            email: formData.email.trim().toLowerCase(), 
+            password: formData.password 
+        }),
       });
       
       const data = await res.json();
       
       if (res.ok) {
-        // ✅ SAVE THE TOKEN TO LOCAL STORAGE IMMEDIATELY
-        localStorage.setItem('token', data.access_token);
-        localStorage.setItem('username', data.user.username);
-        localStorage.setItem('wallet_balance', data.user.wallet_balance);
-
-        // ✅ PASS THE WHOLE DATA OBJECT (so page.js sees access_token)
+        // 💡 We let page.js handle localStorage and state updates 
+        // to ensure everything triggers in the correct order.
         onLoginSuccess(data); 
       } else {
         alert(data.detail || "Login failed.");
@@ -86,11 +88,10 @@ export default function Auth({ onLoginSuccess }) {
     if (verificationCode.length !== 6) return alert("Please enter a 6-digit code.");
     setLoading(true);
     try {
-      // 👇 Updated to use the Environment Variable
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/signup/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: formData.email, code: verificationCode }),
+        body: JSON.stringify({ email: formData.email.trim().toLowerCase(), code: verificationCode }),
       });
 
       if (res.ok) {
@@ -99,7 +100,8 @@ export default function Auth({ onLoginSuccess }) {
         setStep('form');
         setVerificationCode('');
       } else {
-        alert("Invalid or expired code.");
+        const err = await res.json();
+        alert(err.detail || "Invalid or expired code.");
       }
     } finally {
       setLoading(false);
@@ -189,7 +191,7 @@ export default function Auth({ onLoginSuccess }) {
 
             <div className="text-center pt-4">
               <button 
-                type="button"
+                type="button" 
                 onClick={toggleMode}
                 className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-green-500 transition-colors"
               >

@@ -1,22 +1,23 @@
-from fastapi import APIRouter, Depends, HTTPException
-from typing import List
+from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import List, Optional
 from app.core.deps import get_current_admin
 from app.repositories.user_repo import UserRepository
 from app.services.wallet_service import WalletService
+from app.db.redis import redis_client
 from bson import ObjectId
 from datetime import datetime, timezone
+import json
 
 router = APIRouter()
 user_repo = UserRepository()
 wallet_service = WalletService()
 
-# --- 📊 ANALYTICS ROUTES ---
-
+# --- 📊 ANALYTICS ---
 @router.get("/revenue/today")
 async def get_revenue(admin: dict = Depends(get_current_admin)):
     db = user_repo.collection.database
     
-    # 1. Gross Deposits
+    # 1. Gross Collections (Deposits)
     dep_res = await db["deposits"].aggregate([
         {"$match": {"status": "COMPLETED"}}, 
         {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
@@ -30,20 +31,21 @@ async def get_revenue(admin: dict = Depends(get_current_admin)):
     ]).to_list(1)
     payout_val = with_res[0]["total"] if with_res else 0
 
-    # 3. 📉 CALCULATE PROFIT (The Missing Piece)
-    
-    # A. Withdrawal Fees (5% of all withdrawals)
+    # 3. Net Profit Calculation
+    # Profit = 5% withdrawal fee + (Total Matches * 10 PKR entry difference)
     withdrawal_fees = int(payout_val * 0.05)
-
-    # B. Game Fees (10 PKR per completed match)
-    # We count how many games are in the history
-    total_matches = await db["match_history"].count_documents({})
-    game_fees = total_matches * 10 
+    total_matches = await db["users"].aggregate([
+        {"$group": {"_id": None, "total": {"$sum": "$total_matches"}}}
+    ]).to_list(1)
     
-    # C. Total Net Profit
+    # Note: total_matches in users is sum of both players. Actual matches = total / 2
+    # Fee per match is 100 (pool) - 90 (winner) = 10 PKR
+    match_count = (total_matches[0]["total"] if total_matches else 0) / 2
+    game_fees = int(match_count * 10)
+    
     net_profit = withdrawal_fees + game_fees
 
-    # 4. System Liquidity (User Money)
+    # 4. System Liquidity (User Balances)
     user_res = await db["users"].aggregate([
         {"$group": {"_id": None, "total": {"$sum": "$wallet_balance"}}}
     ]).to_list(1)
@@ -51,7 +53,7 @@ async def get_revenue(admin: dict = Depends(get_current_admin)):
     
     return {
         "metrics": {
-            "net_profit": net_profit,          # ✅ Now includes Game Fees
+            "net_profit": net_profit,
             "system_liquidity": liquidity_val, 
             "gross_collections": gross_val,
             "total_payouts": payout_val 
@@ -62,52 +64,70 @@ async def get_revenue(admin: dict = Depends(get_current_admin)):
 async def get_health(admin: dict = Depends(get_current_admin)):
     db = user_repo.collection.database
     
-    # 1. Check Database
+    # Database Check
     try:
         await db.command("ping")
-        db_status = True
-        count = await db["users"].count_documents({})
-    except Exception as e:
-        db_status = False
-        count = 0
+        db_status = "Online"
+        reg_users = await db["users"].estimated_document_count()
+    except Exception:
+        db_status = "Offline"
+        reg_users = 0
         
-    # 2. Check Real-Time Users
+    # Real-time Metrics
     try:
-        from app.core.store import connected_matchmaking_users, active_matches
+        # Note: 'keys' is expensive in huge prod, but fine for <10k users on Upstash
+        online_keys = redis_client.keys("online:*")
+        total_online = len(online_keys)
         
-        waiting_count = len(connected_matchmaking_users)
-        playing_count = len(active_matches) * 2
-        total_online = waiting_count + playing_count
-        matches_count = len(active_matches)
-        
-    except ImportError:
+        active_match_keys = redis_client.keys("match:live:*")
+        matches_count = len(active_match_keys)
+    except Exception:
         total_online = 0
         matches_count = 0
     
     return {
-        "database": {"connected": db_status, "total_registered_users": count},
-        "system_info": {"version": "1.2.2", "environment": "Production"},
-        "real_time_metrics": {
+        "status": "Healthy",
+        "database": {"status": db_status, "total_registered": reg_users},
+        "real_time": {
             "active_matches": matches_count,
             "total_players_online": total_online
         }
     }
 
-@router.get("/stats/peak-times")
-async def get_peak_times(admin: dict = Depends(get_current_admin)):
-    return [
-        {"hour": "10 AM", "matches": 12},
-        {"hour": "2 PM", "matches": 45},
-        {"hour": "6 PM", "matches": 80},
-        {"hour": "10 PM", "matches": 110},
-    ]
+# --- 👥 USER MANAGEMENT (MISSING IN YOUR CODE) ---
+@router.get("/users")
+async def get_users(
+    page: int = 1, 
+    search: str = "", 
+    admin: dict = Depends(get_current_admin)
+):
+    db = user_repo.collection.database
+    limit = 20
+    skip = (page - 1) * limit
+    
+    query = {}
+    if search:
+        query = {
+            "$or": [
+                {"email": {"$regex": search, "$options": "i"}},
+                {"username": {"$regex": search, "$options": "i"}}
+            ]
+        }
 
-# --- 💰 FINANCIAL MANAGEMENT ROUTES ---
-# (Keep the rest of the file exactly as is)
+    users_cursor = db["users"].find(query).skip(skip).limit(limit).sort("created_at", -1)
+    users = await users_cursor.to_list(limit)
+    
+    # Serialize ObjectId
+    for u in users:
+        u["_id"] = str(u["_id"])
+        
+    return {"users": users}
+
+# --- 💰 DEPOSITS ---
 @router.get("/deposits/pending")
 async def get_pending_deposits(admin: dict = Depends(get_current_admin)):
     db = user_repo.collection.database
-    deposits = await db["deposits"].find({"status": "PENDING"}).to_list(100)
+    deposits = await db["deposits"].find({"status": "PENDING"}).sort("created_at", -1).to_list(100)
     for d in deposits:
         d["_id"] = str(d["_id"])
         d["user_id"] = str(d["user_id"])
@@ -119,10 +139,12 @@ async def process_deposit(trx_id: str, action: str, admin: dict = Depends(get_cu
     deposit = await db["deposits"].find_one({"trx_id": trx_id, "status": "PENDING"})
     
     if not deposit:
-        raise HTTPException(status_code=404, detail="Deposit not found")
+        raise HTTPException(status_code=404, detail="Deposit not found or already processed")
         
     if action == "approve":
+        # Credit the user wallet via Service
         await wallet_service.handle_manual_deposit(str(deposit["user_id"]), deposit["amount"], trx_id)
+        
         await db["deposits"].update_one(
             {"trx_id": trx_id}, 
             {"$set": {"status": "COMPLETED", "approved_at": datetime.now(timezone.utc)}}
@@ -134,49 +156,99 @@ async def process_deposit(trx_id: str, action: str, admin: dict = Depends(get_cu
         )
     return {"status": "success"}
 
+# --- 🏦 WITHDRAWALS (MISSING IN YOUR CODE) ---
 @router.get("/withdrawals/pending")
 async def get_pending_withdrawals(admin: dict = Depends(get_current_admin)):
     db = user_repo.collection.database
-    withdrawals = await db["withdrawals"].find({"status": "PENDING"}).to_list(100)
-    results = []
-    for w in withdrawals:
-        user = await db["users"].find_one({"_id": w["user_id"]})
-        results.append({
-            "_id": str(w["_id"]),
-            "username": user["username"] if user else "Unknown",
-            "amount": w["amount"],
-            "method": w["method"],
-            "account_number": w.get("account_number", "N/A"), 
-            "account_name": w.get("account_name", "N/A"),
-            "status": w["status"],
-            "date": w["created_at"]
-        })
-    return results
-
-@router.post("/withdrawal/{w_id}/{action}")
-async def process_withdrawal(w_id: str, action: str, admin: dict = Depends(get_current_admin)):
-    db = user_repo.collection.database
-    try:
-        w_oid = ObjectId(w_id)
-    except:
-         raise HTTPException(status_code=400, detail="Invalid ID format")
+    withdrawals = await db["withdrawals"].find({"status": "PENDING"}).sort("created_at", -1).to_list(100)
     
-    w_req = await db["withdrawals"].find_one({"_id": w_oid, "status": "PENDING"})
-    if not w_req:
-         raise HTTPException(status_code=404, detail="Withdrawal request not found")
+    # Enrich with Username if possible, or just send IDs
+    for w in withdrawals:
+        w["_id"] = str(w["_id"])
+        w["user_id"] = str(w["user_id"])
+        
+        # Optional: Fetch username for UI convenience
+        user = await db["users"].find_one({"_id": ObjectId(w["user_id"])})
+        if user:
+            w["username"] = user.get("username", "Unknown")
+            
+    return {"pending_withdrawals": withdrawals}
+
+@router.post("/withdraw/{withdraw_id}/{action}")
+async def process_withdrawal(withdraw_id: str, action: str, admin: dict = Depends(get_current_admin)):
+    db = user_repo.collection.database
+    
+    try:
+        w_oid = ObjectId(withdraw_id)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid ID")
+
+    withdrawal = await db["withdrawals"].find_one({"_id": w_oid, "status": "PENDING"})
+    
+    if not withdrawal:
+        raise HTTPException(status_code=404, detail="Withdrawal not found")
 
     if action == "approve":
+        # Mark as completed (Money was already deducted when request was made)
         await db["withdrawals"].update_one(
-            {"_id": w_oid}, 
+            {"_id": w_oid},
             {"$set": {"status": "COMPLETED", "processed_at": datetime.now(timezone.utc)}}
         )
     elif action == "reject":
-        await db["users"].update_one(
-            {"_id": w_req["user_id"]}, 
-            {"$inc": {"wallet_balance": w_req["amount"]}}
-        )
+        # Refund the money to the user
+        await user_repo.update_wallet(str(withdrawal["user_id"]), withdrawal["amount"])
+        
         await db["withdrawals"].update_one(
-            {"_id": w_oid}, 
+            {"_id": w_oid},
             {"$set": {"status": "REJECTED", "rejected_at": datetime.now(timezone.utc)}}
         )
+        
     return {"status": "success"}
+@router.get("/stats/peak-times")
+async def get_peak_activity(admin: dict = Depends(get_current_admin)):
+    db = user_repo.collection.database
+    
+    # Aggregation: Extract hour from timestamp and count matches
+    pipeline = [
+        # 1. Project the hour from the ISO timestamp string
+        # Note: MongoDB stores strings in your schema, so we slice the string "YYYY-MM-DDTHH:..."
+        # Or if you stored standard ISODates: {"$hour": "$timestamp"}
+        {
+            "$project": {
+                "hour": {"$substr": ["$timestamp", 11, 2]} # Extracts "14" from "2024-01-01T14:30:00"
+            }
+        },
+        # 2. Group by Hour
+        {
+            "$group": {
+                "_id": "$hour",
+                "matches": {"$sum": 1}
+            }
+        },
+        # 3. Sort by Hour
+        {"$sort": {"_id": 1}}
+    ]
+
+    try:
+        # We query the 'match_history' collection if you have one, 
+        # OR we query users and unwind their 'recent_matches' if you don't have a separate collection.
+        # Ideally, you should have a 'matches' collection for analytics.
+        
+        # Option A: If you have a 'matches' collection (Recommended):
+        # results = await db["matches"].aggregate(pipeline).to_list(24)
+
+        # Option B: Aggregate from Users (Slower but works with your current repo)
+        results = await db["users"].aggregate([
+            {"$unwind": "$recent_matches"},
+            {"$project": {"hour": {"$substr": ["$recent_matches.timestamp", 11, 2]}}},
+            {"$group": {"_id": "$hour", "matches": {"$sum": 1}}},
+            {"$sort": {"_id": 1}}
+        ]).to_list(24)
+
+        # Format for Recharts
+        formatted_data = [{"hour": r["_id"], "matches": r["matches"]} for r in results]
+        return formatted_data
+
+    except Exception as e:
+        print(f"Stats Error: {e}")
+        return []

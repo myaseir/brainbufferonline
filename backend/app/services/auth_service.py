@@ -1,62 +1,88 @@
 from app.repositories.user_repo import UserRepository
 from app.core.security import get_password_hash, verify_password
+from app.db.redis import redis_client
+import json
+from datetime import datetime, timezone
+from bson import ObjectId
+
+# --- 🚀 CUSTOM ENCODER ---
+class MongoEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, ObjectId):
+            return str(obj)
+        return super().default(obj)
 
 class AuthService:
     def __init__(self):
         self.repo = UserRepository()
 
+    def _prepare_for_cache(self, data: dict) -> str:
+        """
+        Uses the Custom Encoder to handle nested dates and IDs automatically.
+        """
+        return json.dumps(data, cls=MongoEncoder)
+
     async def get_user_by_email(self, email: str):
-        """Finds a user by email via the repository."""
-        return await self.repo.get_by_email(email)
+        """
+        Finds a user by email with a JSON-safe Cache-First strategy.
+        """
+        cached_user = redis_client.get(f"user:email:{email}")
+        if cached_user:
+            return json.loads(cached_user)
+
+        user = await self.repo.get_by_email(email)
+        
+        if user:
+            serialized_user = self._prepare_for_cache(user)
+            redis_client.set(f"user:email:{email}", serialized_user, ex=3600)
+            
+        return user
 
     async def validate_user(self, identifier: str, password: str):
         """
-        Validates user credentials for login.
-        Supports checking by email OR username.
-        Returns user data if successful, None otherwise.
+        Validates user credentials for login using high-speed caching.
         """
-        # 1. Search by email first (standard repo method)
-        user = await self.repo.get_by_email(identifier)
+        user = await self.get_user_by_email(identifier)
         
-        # 2. If not found by email, try searching by username
         if not user:
             user = await self.repo.get_by_username(identifier)
             
         if not user:
             return None
         
-        # 3. Robust Password Check:
-        # Check for 'hashed_password' (New format) OR 'password' (Old format)
-        # We use .get() to return None instead of crashing if key is missing
         stored_hash = user.get("hashed_password") or user.get("password")
-        
-        if not stored_hash:
-            return None # No password found in DB record
-            
-        if not verify_password(password, stored_hash): 
+        if not stored_hash or not verify_password(password, stored_hash): 
             return None
             
         return user
 
     async def register_user(self, username, password, email):
-        """Hashes password and saves a new user to the database."""
-        # 1. Double check existence (Safety check)
+        """
+        Hashes password and saves a new user with pre-caching.
+        """
         existing_email = await self.repo.get_by_email(email)
         existing_user = await self.repo.get_by_username(username)
         
         if existing_email or existing_user:
             return None
         
-        # 2. Prepare user data
         new_user = {
             "username": username,
             "email": email,
-            # ✅ Save as 'hashed_password' to match new standard
             "hashed_password": get_password_hash(password),
-            "wallet_balance": 50.0,  # 🎁 Welcome bonus
+            "wallet_balance": 50.0,
             "total_wins": 0,
-            "role": "user" # Default role
+            "role": "user",
+            "created_at": datetime.now(timezone.utc)
         }
         
-        # 3. Save to DB
-        return await self.repo.create_user(new_user)
+        user_id = await self.repo.create_user(new_user)
+        
+        # Pre-cache the new user
+        new_user["_id"] = user_id
+        serialized_new_user = self._prepare_for_cache(new_user)
+        redis_client.set(f"user:email:{email}", serialized_new_user, ex=3600)
+        
+        return user_id

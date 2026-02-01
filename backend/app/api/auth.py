@@ -1,18 +1,17 @@
 import random
 import asyncio
-import requests
+import httpx  # Using httpx for async email sending
+import json
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, status
 from pydantic import BaseModel, EmailStr
 from app.services.auth_service import AuthService
 from app.core.security import create_access_token
 from app.core.deps import get_current_user
-from app.core.config import settings  # ✅ Uses your updated config
+from app.core.config import settings
+from app.db.redis import redis_client # Import our shared brain
 
 router = APIRouter()
 auth_service = AuthService()
-
-# Temporary in-memory store for OTPs
-pending_users = {}
 
 # --- Pydantic Models ---
 class SignupRequest(BaseModel):
@@ -28,120 +27,54 @@ class VerifyRequest(BaseModel):
     email: str
     code: str
 
-# --- Helper: Cleanup Task ---
-async def cleanup_otp(email: str, delay: int = 600):
-    await asyncio.sleep(delay)
-    if email in pending_users:
-        del pending_users[email]
-
-# --- Helper: Email Sender (Brevo API) ---
-def send_otp_email(target_email: str, code: str):
-    """
-    Sends an OTP email using the Brevo HTTP API.
-    ✅ Works on Render (Bypasses SMTP port blocking).
-    ✅ Uses credentials from app.core.config.settings
-    """
-    
-    # 1. Get Credentials from Settings
+# --- Helper: Email Sender (Updated to Async) ---
+async def send_otp_email(target_email: str, code: str):
+    # These pull directly from your .env via your settings object
     brevo_key = settings.BREVO_API_KEY
     sender_email = settings.SENDER_EMAIL
+    sender_name = getattr(settings, "SENDER_NAME", "Glacia Labs")
 
     if not brevo_key:
-        print("❌ Error: BREVO_API_KEY is missing in settings")
+        print("❌ Error: BREVO_API_KEY is missing in .env")
         return
 
-    # 2. Brevo API Endpoint
     url = "https://api.brevo.com/v3/smtp/email"
-    
-    # 3. Headers
     headers = {
         "accept": "application/json",
         "api-key": brevo_key,
         "content-type": "application/json"
     }
 
-    # 4. Email Payload
     payload = {
-        "sender": {
-            "name": settings.PROJECT_NAME, # Uses your project name from config
-            "email": sender_email 
-        },
-        "to": [
-            {
-                "email": target_email
-            }
-        ],
-        "subject": f"Verify Your {settings.PROJECT_NAME} Account",
+        "sender": {"name": sender_name, "email": sender_email},
+        "to": [{"email": target_email}],
+        "subject": f"Verify Your Account - {sender_name}",
         "htmlContent": f"""
-            <div style="font-family: Arial, sans-serif; max-width: 400px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #f8fafc;">
-                <h2 style="color: #1e293b; text-align: center;">Security Code</h2>
-                <p style="color: #475569; text-align: center;">Enter the code below to verify your account:</p>
-                <div style="background-color: #ffffff; border: 2px dashed #cbd5e1; border-radius: 8px; padding: 15px; margin: 20px 0; text-align: center;">
-                    <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #0f172a;">{code}</span>
-                </div>
-                <p style="font-size: 12px; color: #94a3b8; text-align: center;">This code will expire in 10 minutes.</p>
-            </div>
+            <html>
+                <body style="font-family: sans-serif; padding: 20px;">
+                    <h2>Your Security Code</h2>
+                    <p>Use the following code to verify your identity:</p>
+                    <div style="background: #f4f4f4; padding: 10px; font-size: 24px; font-weight: bold; letter-spacing: 2px;">
+                        {code}
+                    </div>
+                    <p>This code was requested for <strong>{target_email}</strong>.</p>
+                </body>
+            </html>
         """
     }
 
-    # 5. Send Request
-    try:
-        response = requests.post(url, json=payload, headers=headers)
-        
-        # Check for success (201 Created or 200 OK)
-        if response.status_code in [200, 201, 202]:
-            print(f"✅ OTP successfully sent to {target_email} via Brevo API!")
-        else:
-            print(f"❌ Brevo API Error: {response.status_code} - {response.text}")
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(url, json=payload, headers=headers)
             
-    except Exception as e:
-        print(f"❌ Exception sending email: {type(e).__name__} - {e}")
-
+            if response.status_code >= 400:
+                print(f"❌ Brevo API Error ({response.status_code}): {response.text}")
+            else:
+                print(f"✅ OTP sent successfully to {target_email}")
+                
+        except httpx.RequestError as e:
+            print(f"❌ Network Exception while hitting Brevo: {e}")
 # --- Endpoints ---
-
-@router.get("/me")
-async def get_current_user_details(user: dict = Depends(get_current_user)):
-    """
-    Fetches the current authenticated user's fresh data from the DB.
-    """
-    return {
-        "username": user.get("username"),
-        "email": user.get("email"),
-        "wallet_balance": user.get("wallet_balance", 0),
-        "user_id": str(user.get("_id")),
-        "total_wins": user.get("total_wins", 0),
-        "total_matches": user.get("total_matches", 0),
-        "recent_matches": user.get("recent_matches", []), 
-        "rank": user.get("rank", "Elite")
-    }
-
-@router.post("/login")
-async def login(data: LoginRequest):
-    user = await auth_service.validate_user(data.email, data.password)
-    
-    if not user:
-        raise HTTPException(
-            status_code=401, 
-            detail="Invalid email or password"
-        )
-    
-    access_token = create_access_token(data={
-        "sub": str(user["_id"]),
-        "email": user["email"],
-        "username": user["username"]
-    })
-    
-    return {
-        "msg": "Login successful",
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": {
-            "username": user["username"],
-            "email": user["email"],
-            "wallet_balance": user.get("wallet_balance", 0),
-            "user_id": str(user["_id"])
-        }
-    }
 
 @router.post("/signup/request")
 async def signup_request(user_data: SignupRequest, background_tasks: BackgroundTasks):
@@ -151,25 +84,39 @@ async def signup_request(user_data: SignupRequest, background_tasks: BackgroundT
     
     otp_code = str(random.randint(100000, 999999))
     
-    pending_users[user_data.email] = {
+    # --- 🚀 SCALING UPDATE: REDIS STORAGE ---
+    # We store the signup info in Redis with a 10-minute expiry (600s)
+    # This works across all servers!
+    signup_data = {
         "username": user_data.username,
         "password": user_data.password, 
         "code": otp_code
     }
     
-    # Add email sending to background task to keep API fast
-    background_tasks.add_task(send_otp_email, user_data.email, otp_code)
-    background_tasks.add_task(cleanup_otp, user_data.email)
+    # Store as a JSON string in Redis
+    redis_client.set(
+        f"signup:{user_data.email}", 
+        json.dumps(signup_data), 
+        ex=600
+    )
     
+    background_tasks.add_task(send_otp_email, user_data.email, otp_code)
     return {"msg": "Verification code sent to email. Valid for 10 minutes."}
 
 @router.post("/signup/verify")
 async def signup_verify(data: VerifyRequest):
-    user_info = pending_users.get(data.email)
+    # --- 🚀 SCALING UPDATE: FETCH FROM REDIS ---
+    cached_data = redis_client.get(f"signup:{data.email}")
     
-    if not user_info or user_info["code"] != data.code:
-        raise HTTPException(status_code=400, detail="Invalid or expired code")
+    if not cached_data:
+        raise HTTPException(status_code=400, detail="OTP expired or email not found")
     
+    user_info = json.loads(cached_data)
+    
+    if user_info["code"] != data.code:
+        raise HTTPException(status_code=400, detail="Invalid verification code")
+    
+    # Create the user in MongoDB
     user_id = await auth_service.register_user(
         user_info["username"], 
         user_info["password"],
@@ -179,7 +126,43 @@ async def signup_verify(data: VerifyRequest):
     if not user_id:
         raise HTTPException(status_code=500, detail="User creation failed")
     
-    if data.email in pending_users:
-        del pending_users[data.email]
+    # Delete from Redis after successful verification
+    redis_client.delete(f"signup:{data.email}")
     
-    return {"msg": "Account verified and created successfully", "user_id": str(user_id)}
+    return {"msg": "Account verified successfully", "user_id": str(user_id)}
+
+@router.get("/me")
+async def get_current_user_details(user: dict = Depends(get_current_user)):
+    """
+    Returns the full profile including the recent_matches array.
+    """
+    # 🚀 CRITICAL UPDATE: Add recent_matches so the dashboard can see them
+    return {
+        "username": user.get("username"),
+        "email": user.get("email"),
+        "wallet_balance": round(user.get("wallet_balance", 0), 2), # 💰 Precision Fix
+        "user_id": str(user.get("_id") or user.get("id")), # Ensure ID is a string
+        "total_wins": user.get("total_wins", 0),
+        "total_matches": user.get("total_matches", 0),
+        "rank": user.get("rank", "Elite"),
+        "recent_matches": user.get("recent_matches", []) # ✅ Added this line
+    }
+
+@router.post("/login")
+async def login(data: LoginRequest):
+    user = await auth_service.validate_user(data.email, data.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    access_token = create_access_token(data={"sub": str(user["_id"])})
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "username": user["username"],
+            "wallet_balance": round(user.get("wallet_balance", 0), 2),
+            "user_id": str(user["_id"]),
+            "recent_matches": user.get("recent_matches", []) # ✅ Also good to include on login
+        }
+    }

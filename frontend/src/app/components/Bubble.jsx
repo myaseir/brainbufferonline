@@ -28,7 +28,7 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
   const [opponentScore, setOpponentScore] = useState(0);
   const [connectionStatus, setConnectionStatus] = useState('Connecting...'); 
   const serverRoundsRef = useRef(null); 
-
+  const currentStepRef = useRef(0);
   const [opponentName, setOpponentName] = useState('Opponent'); 
   const [waitingForResult, setWaitingForResult] = useState(false);
   const [isForfeit, setIsForfeit] = useState(false); 
@@ -41,24 +41,24 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
   const [clickedNumbers, setClickedNumbers] = useState([]);
   const [correctNumbers, setCorrectNumbers] = useState([]);
   const [isDraw, setIsDraw] = useState(false);
-  
+  const opponentFinishedRef = useRef(false);
   const [countdown, setCountdown] = useState(3);
   const [roundTimer, setRoundTimer] = useState(10);
   const [showPerfectRound, setShowPerfectRound] = useState(false);
   const [showRoundScreen, setShowRoundScreen] = useState(false);
   const [won, setWon] = useState(false);
   const [highScore, setHighScore] = useState(0);
-
+const [reconnectTimer, setReconnectTimer] = useState(null);
   const [showMenu, setShowMenu] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
   const [settings, setSettings] = useState({ music: true, sfx: true, vibration: true });
-
+const waitingTimeoutRef = useRef(null);
   const roundTimerRef = useRef(null);
   const countdownIntervalRef = useRef(null);
   const hideTimerRef = useRef(null);
   const roundEndTimeRef = useRef(0); 
   const processingClickRef = useRef(new Set());
-
+const scoreRef = useRef(0);
   const correctAudioRef = useRef(null);
   const wrongAudioRef = useRef(null);
   const gameOverAudioRef = useRef(null);
@@ -93,78 +93,109 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
   }, [settings.music, isPaused, gameState]);
 
   // --- SOCKET LOGIC ---
-  useEffect(() => {
-    if (mode === 'online' && socket) {
-      setConnectionStatus('Connected. Waiting for Opponent...');
-      let readyInterval = null;
+ useEffect(() => {
+  if (mode === 'online' && socket) {
+    setConnectionStatus('Connected. Waiting for Opponent...');
+    let readyInterval = null;
 
-      const sendReady = () => {
-        if (socket.readyState === WebSocket.OPEN) {
-             socket.send(JSON.stringify({ type: "CLIENT_READY" }));
+    const sendReady = () => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "CLIENT_READY" }));
+      }
+    };
+
+    sendReady();
+    socket.onopen = sendReady;
+
+    readyInterval = setInterval(() => {
+      if (serverRoundsRef.current) clearInterval(readyInterval); 
+      else sendReady();
+    }, 1000);
+
+    const handleSocketMessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'GAME_START') { 
+          clearInterval(readyInterval); 
+          serverRoundsRef.current = data.rounds; 
+          if(data.opponent_name) setOpponentName(data.opponent_name);
+          setScore(data.your_current_score || 0);
+          scoreRef.current = data.your_current_score || 0;
+          setOpponentScore(data.op_current_score || 0);
+          setConnectionStatus('Match Starting...');
+          startGame();
+        } 
+        else if (data.type === 'WAITING_FOR_OPPONENT') {
+          // 🔥 Handle the 10s grace period
+          setReconnectTimer(data.seconds_left);
         }
-      };
-
-      sendReady();
-      socket.onopen = sendReady;
-
-      readyInterval = setInterval(() => {
-        if (serverRoundsRef.current) clearInterval(readyInterval); 
-        else sendReady();
-      }, 1000);
-
-      const handleSocketMessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          
-          if (data.type === 'MATCH_START') {
-            clearInterval(readyInterval); 
-            serverRoundsRef.current = data.gameData.rounds;
-            if(data.opponent) setOpponentName(data.opponent);
-            setConnectionStatus('Match Starting...');
-            startGame();
-          } 
-          else if (data.type === 'MATCH_ABORTED') {
-            clearInterval(readyInterval);
-            const leaver = data.leaver_name || 'Opponent';
-            setConnectionStatus(`${leaver} left. Refunded.`); 
-            setTimeout(() => { if (onRequeue) onRequeue(); else if (onQuit) onQuit(); }, 2000);
+        else if (data.type === 'SYNC_STATE') {
+          setReconnectTimer(null); // Clear timer once opponent is back
+          setOpponentScore(data.opponent_score);
+          // Fixed: Check if your_score is defined
+          if (data.your_score !== undefined && data.your_score > scoreRef.current){
+            setScore(data.your_score);
+            scoreRef.current = data.your_score;
           }
-          else if (data.type === 'OPPONENT_UPDATE') {
-            setOpponentScore(data.score);
-          } 
-          else if (data.type === 'OPPONENT_FORFEIT') {
+        }
+        else if (data.type === 'MATCH_ABORTED') {
+          clearInterval(readyInterval);
+          const leaver = data.leaver_name || 'Opponent';
+          setConnectionStatus(`${leaver} left. Refunded.`); 
+          setTimeout(() => { if (onRequeue) onRequeue(); else if (onQuit) onQuit(); }, 2000);
+        }
+        else if (data.type === 'OPPONENT_FORFEIT') {
+          setWon(true);
+          setIsDraw(false);
+          setWaitingForResult(false); 
+          setIsForfeit(true); 
+          if(data.leaver_name) setOpponentName(data.leaver_name); 
+          handleGameOver(true); 
+        }
+        else if (data.type === 'RESULT') {
+          // 1. Immediately stop the "Waiting" spinner
+          console.log('RESULT Message Received:', data);
+          if (waitingTimeoutRef.current) {
+            clearTimeout(waitingTimeoutRef.current);
+            waitingTimeoutRef.current = null;
+          }
+ 
+          setWaitingForResult(false);
+          
+          // 2. Update scores from the server for consistency
+          setScore(data.my_score);
+          scoreRef.current = data.my_score;
+          setOpponentScore(data.op_score);
+          
+          // 3. Set the outcome
+          if (data.status === "DRAW") {
+            setIsDraw(true);
+            setWon(false);
+          } else if (data.status === "WON") {
             setWon(true);
             setIsDraw(false);
-            setWaitingForResult(false); 
-            setIsForfeit(true); 
-            if(data.leaver_name) setOpponentName(data.leaver_name); 
-            handleGameOver(true); 
+          } else {
+            setWon(false);
+            setIsDraw(false);
           }
-          else if (data.type === 'RESULT') {
-            setWaitingForResult(false);
-            if (data.winner === "DRAW") {
-                setIsDraw(true);
-                setWon(false);
-            } else {
-                const myId = getUserIdFromToken(); 
-                const winnerId = String(data.winner);
-                setWon(myId === winnerId);
-                setIsDraw(false);
-            }
-            setGameState('gameover');
-            clearAllTimers();
-          }
-        } catch (err) { console.error("Socket Error:", err); }
-      };
 
-      socket.addEventListener('message', handleSocketMessage);
-      return () => {
-        socket.removeEventListener('message', handleSocketMessage);
-        if (readyInterval) clearInterval(readyInterval);
-      };
-    }
-  }, [mode, socket]);
+          // 4. Move to Game Over screen
+          setGameState('gameover');
+          
+          // 5. Clean up any remaining game sounds/timers
+          clearAllTimers();
+        }
+      } catch (err) { console.error("Socket Error:", err); }
+    };
 
+    socket.addEventListener('message', handleSocketMessage);
+    return () => {
+      socket.removeEventListener('message', handleSocketMessage);
+      if (readyInterval) clearInterval(readyInterval);
+    };
+  }
+}, [mode, socket]);
   useEffect(() => {
       const savedHighScore = parseInt(localStorage.getItem('highScore')) || 0;
       const tutorialSeen = localStorage.getItem('tutorialSeen') === 'true';
@@ -184,28 +215,41 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
       if (settings.vibration && typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(pattern);
   };
   
-  // --- UPDATED GENERATION LOGIC ---
+  // --- UPDATED GENERATION LOGIC (Robust Anti-Overlap) ---
   const generatePositions = useCallback((count) => {
       const newPositions = [];
+      // Increased safety radius to strictly prevent overlap
+      // Assuming 100% viewport, a bubble is approx 15-20% visually depending on screen ratio.
+      const safetyRadius = 16; 
+      
       for (let i = 0; i < count; i++) {
         let position, attempts = 0, overlaps = true;
-        while (overlaps && attempts < 200) {
+        
+        // Try up to 1000 times to find a non-overlapping spot
+        while (overlaps && attempts < 1000) { 
           attempts++;
+          // Margins to keep inside the container (10% to 90%)
           const left = 10 + Math.random() * 80; 
-          
-          // 🛑 CHANGED: Now uses 5% to 85% of the CONTAINER height (not the screen)
-          // Since the container starts below the navbar, 0% is already "safe".
-          const top = 5 + Math.random() * 80; 
+          const top = 10 + Math.random() * 80; 
 
           const hasCollision = newPositions.some(pos => {
             const dx = pos.left - left;
-            const dy = (pos.top - top) * 1.5; 
-            return Math.sqrt(dx*dx + dy*dy) < 22; 
+            // Weigh 'dy' slightly more to account for typical mobile aspect ratios
+            const dy = (pos.top - top) * 1.2; 
+            const distance = Math.sqrt(dx*dx + dy*dy);
+            return distance < safetyRadius; 
           });
-          if (!hasCollision) { position = { left, top }; overlaps = false; }
+
+          if (!hasCollision) {
+            position = { left, top };
+            overlaps = false;
+          }
         }
-        if (!position) position = { left: 50, top: 50 };
-        newPositions.push(position);
+
+        // If we couldn't find a spot (rare), just push it anyway to avoid crash,
+        // but the high attempt count usually solves it.
+        if (position) newPositions.push(position);
+        else newPositions.push({ left: 50, top: 50 }); // Fallback to center
       }
       return newPositions;
   }, []);
@@ -216,33 +260,46 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
       return Array.from(nums);
   }, []);
 
-  const startTimer = (durationMs) => {
-      if (roundTimerRef.current) clearInterval(roundTimerRef.current);
-      roundEndTimeRef.current = Date.now() + durationMs; 
-      const roundTotalDuration = Math.max(10000 - ((round - 1) * 500), 2000);
-  
-      roundTimerRef.current = setInterval(() => {
-        const now = Date.now();
-        const msLeft = roundEndTimeRef.current - now; 
-        
-        if (msLeft <= 0) {
-          handleGameOver();
-        } else {
-          const progress = (roundTotalDuration - msLeft) / roundTotalDuration;
-          const visualRemaining = 10 * (1 - progress);
-          const secs = Math.max(0, Math.ceil(visualRemaining));
-          setRoundTimer(secs);
-          if (secs <= 3 && settings.sfx && !document.hidden) { 
-             if (tickAudioRef.current?.paused) tickAudioRef.current.play().catch(()=>{});
-          }
+ const startTimer = (durationMs) => {
+    if (roundTimerRef.current) clearInterval(roundTimerRef.current);
+    roundEndTimeRef.current = Date.now() + durationMs;
+    const roundTotalDuration = Math.max(10000 - ((round - 1) * 500), 2000);
+
+    roundTimerRef.current = setInterval(() => {
+      const now = Date.now();
+      const msLeft = roundEndTimeRef.current - now;
+
+      if (msLeft <= 0) {
+        // 🔥 FIX 1: Send GAME_OVER to server when time runs out!
+        // Without this, the server thinks you are still playing.
+        if (mode === 'online' && socket) {
+           socket.send(JSON.stringify({ 
+             type: 'GAME_OVER', 
+             score: scoreRef.current // Use the Ref to get the latest score
+           }));
         }
-      }, 100);
+        
+        handleGameOver();
+      } else {
+        const progress = (roundTotalDuration - msLeft) / roundTotalDuration;
+        const visualRemaining = 10 * (1 - progress);
+        const secs = Math.max(0, Math.ceil(visualRemaining));
+        setRoundTimer(secs);
+        if (secs <= 3 && settings.sfx && !document.hidden) {
+          if (tickAudioRef.current?.paused) tickAudioRef.current.play().catch(() => {});
+        }
+      }
+    }, 100);
   };
 
-  const startRound = useCallback((roundNum) => {
+ const startRound = useCallback((roundNum) => {
       clearAllTimers(); 
       setRoundTimer(10); 
       processingClickRef.current.clear();
+      
+      currentStepRef.current = 0; 
+      setCurrentStep(0); 
+      
       setShowRoundScreen(true);
       setCountdown(3);
       
@@ -254,25 +311,23 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
         } else {
           clearInterval(countdownIntervalRef.current);
           setShowRoundScreen(false);
-          // Logic for online/offline numbers generation
+          
           if (mode === 'online' && serverRoundsRef.current) {
-            const roundData = serverRoundsRef.current[roundNum - 1]; 
-            if (roundData) {
-              setNumbers(roundData.numbers);
-              setPositions(roundData.positions);
-            } else {
-              const count = Math.min(3 + Math.floor((roundNum - 1) / 2), 8); 
-              setNumbers(generateNumbers(count));
-              setPositions(generatePositions(count));
-            }
+             const roundData = serverRoundsRef.current[roundNum - 1]; 
+             if (roundData) {
+               setNumbers(roundData.numbers);
+               setPositions(roundData.positions);
+             } else {
+               const count = Math.min(3 + Math.floor((roundNum - 1) / 2), 8); 
+               setNumbers(generateNumbers(count));
+               setPositions(generatePositions(count));
+             }
           } else {
             const count = Math.min(3 + Math.floor((roundNum - 1) / 2), 8); 
             setNumbers(generateNumbers(count));
             setPositions(generatePositions(count));
           }
-  
-          setCurrentStep(0);
-          setError(false);
+
           setClickedNumbers([]);
           setCorrectNumbers([]);
           setGameState('showing'); 
@@ -292,11 +347,18 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
       }
   }, [gameState, round, isPaused]); 
 
-  const startGame = useCallback(() => {
+ const startGame = useCallback(() => {
       if (showTutorial) return; 
       if (mode === 'online' && !serverRoundsRef.current) return;
+      
       clearAllTimers();
+      
+      // 🔥 FIX 2: Clear the "Double Click Prevention" set
+      // If you don't do this, numbers from the previous game remain unclickable!
+      processingClickRef.current.clear(); 
+
       setScore(0);
+      scoreRef.current = 0;
       setOpponentScore(0);
       setRound(1);
       setWon(false);
@@ -335,15 +397,15 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
   const handleGameOver = (isForfeit = false) => {
     setRoundTimer(0);
     clearAllTimers(); 
-    setError(true);
     setGameState('gameover');
     
     if (mode === 'online' && socket) {
       if (!isForfeit) {
-          setWaitingForResult(true);
-      }
-      socket.send(JSON.stringify({ type: 'GAME_OVER', finalScore: score }));
+     setWaitingForResult(true);
+    // 🔥 UPDATED: Timeout doesn't set won/isDraw - let RESULT handle it
+    
     }
+  }
     
     if (settings.sfx && !document.hidden) gameOverAudioRef.current?.play().catch(()=>{});
   };
@@ -369,66 +431,81 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
       }
   };
   
-  const handleClick = (num) => {
-      if (gameState !== 'playing' || isPaused) return;
-      if (processingClickRef.current.has(num)) return;
-      processingClickRef.current.add(num);
-  
-      const sorted = [...numbers].sort((a, b) => a - b);
-      setClickedNumbers(prev => [...prev, num]);
-  
-      if (num === sorted[currentStep]) {
-        setCorrectNumbers(prev => [...prev, num]);
-        vibrate(50);
-        if(settings.sfx) correctAudioRef.current?.cloneNode().play().catch(()=>{});
-  
-        if (currentStep + 1 === sorted.length) {
-          clearAllTimers(); 
-          setRoundTimer(10); 
-          const basePoints = numbers.length; 
-          const timeBonus = Math.floor(roundTimer); 
-          const newScore = score + basePoints + timeBonus;
-  
-          if (mode === 'online' && socket) socket.send(JSON.stringify({ type: 'SCORE_UPDATE', score: newScore }));
-  
-          if (newScore > highScore) {
-            localStorage.setItem('highScore', newScore);
-            setHighScore(newScore);
-          }
-          setScore(newScore);
-  
-          if (!error) {
-            setShowPerfectRound(true);
-            setTimeout(() => setShowPerfectRound(false), 1200);
-          }
-  
-          if (round + 1 > maxRound) {
-            if (mode === 'offline') {
-              setWon(true);
-              handleGameOver();
-              if(settings.sfx) winAudioRef.current?.play();
-            } else {
-              setGameState('showing');
-            }
+const handleClick = (num) => {
+    if (gameState !== 'playing' || isPaused || error) return;
+    if (processingClickRef.current.has(num)) return;
+    processingClickRef.current.add(num);
+
+    const sorted = [...numbers].sort((a, b) => a - b);
+    setClickedNumbers(prev => [...prev, num]);
+
+    if (num === sorted[currentStepRef.current]) {
+      // --- ✅ CORRECT CLICK ---
+      currentStepRef.current += 1;
+      setCurrentStep(prev => prev + 1);
+
+      setCorrectNumbers(prev => [...prev, num]);
+      vibrate(50);
+      if (settings.sfx) correctAudioRef.current?.cloneNode().play().catch(() => {});
+
+      // 🔥 FIX: Use scoreRef for instant calculation
+      const pointsPerPop = 10;
+      const newScore = scoreRef.current + pointsPerPop; // Use Ref, not State
+      
+      scoreRef.current = newScore; // Update Ref Instantly
+      setScore(newScore);          // Update UI (Visual only)
+      
+      // Update High Score
+      if (newScore > highScore) {
+        localStorage.setItem('highScore', newScore);
+        setHighScore(newScore);
+      }
+
+      // Send to Server
+      if (mode === 'online' && socket) {
+        socket.send(JSON.stringify({ type: 'SCORE_UPDATE', score: newScore }));
+      }
+
+      // --- ROUND COMPLETION ---
+      if (currentStepRef.current === sorted.length) {
+        clearAllTimers();
+        setRoundTimer(10);
+        
+        if (!error) {
+          setShowPerfectRound(true);
+          setTimeout(() => setShowPerfectRound(false), 1200);
+        }
+
+        if (round + 1 > maxRound) {
+          if (mode === 'offline') {
+            setWon(true);
+            handleGameOver();
+            if (settings.sfx) winAudioRef.current?.play();
           } else {
-            setRound(r => r + 1);
-            setTimeout(() => startRound(round + 1), 1000);
+            socket.send(JSON.stringify({ type: 'GAME_OVER', score: newScore }));
+            handleGameOver();
           }
         } else {
-          setCurrentStep(prev => prev + 1);
+          setRound(r => r + 1);
+          setTimeout(() => startRound(round + 1), 1000);
         }
-      } else {
-        clearAllTimers(); 
-        setError(true);
-        vibrate([200, 100, 200]);
-        if(settings.sfx) wrongAudioRef.current?.play();
-        if (mode === 'online' && socket) socket.send(JSON.stringify({ type: 'GAME_OVER', finalScore: score }));
-        
-        setTimeout(() => {
-          handleGameOver(); 
-          if(settings.sfx && !document.hidden) gameOverAudioRef.current?.play();
-        }, 500);
       }
+    } else {
+      // --- ❌ WRONG CLICK ---
+      clearAllTimers();
+      setError(true);
+      vibrate(200);
+      if (settings.sfx) wrongAudioRef.current?.play();
+
+      setTimeout(() => {
+        // Send current safe score (from Ref) if game over
+        if (mode === 'online' && socket) {
+          socket.send(JSON.stringify({ type: 'GAME_OVER', score: scoreRef.current }));
+        }
+        handleGameOver();
+        if (settings.sfx && !document.hidden) gameOverAudioRef.current?.play();
+      }, 600);
+    }
   };
 
   return (
@@ -441,36 +518,44 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
       <audio ref={winAudioRef} src="/win.wav" preload="auto" />
       <audio ref={startSoundRef} src="/start.wav" />
 
-      {/* --- REPLACED HUD WITH NAVBAR COMPONENT --- */}
-      <GameNavbar 
-        score={score}
-        mode={mode}
-        opponentName={opponentName}
-        opponentScore={opponentScore}
-        highScore={highScore}
-        roundTimer={roundTimer}
-        onTogglePause={togglePause}
-      />
+     <GameNavbar 
+  score={score}
+  mode={mode}
+  opponentName={opponentName}
+  opponentScore={opponentScore}
+  highScore={highScore}
+  roundTimer={roundTimer}
+  onTogglePause={togglePause}
+  isReconnecting={reconnectTimer !== null}  // 🔥 NEW: Pass derived reconnecting state
+/>
 
       {/* --- PLAY AREA --- */}
-      {/* 🛑 CHANGED: added top-[120px] and removed pt-20. 
-          This forces the bubble container to start BELOW the navbar. */}
       <div className="absolute left-0 right-0 bottom-0 top-[120px]">
         {numbers.map((num, i) => {
           const isClicked = clickedNumbers.includes(num);
           const isCorrect = correctNumbers.includes(num);
-          const showNumber = gameState === 'showing' || isClicked;
+          
+          // --- UPDATED VISIBILITY LOGIC: Show number if showing, clicked, OR ERROR state exists ---
+          const showNumber = gameState === 'showing' || isClicked || error;
+          
           return (
             <button
               key={`${round}-${i}`}
               onClick={() => handleClick(num)}
-              disabled={gameState !== 'playing' || isPaused}
+              disabled={gameState !== 'playing' || isPaused || error}
               style={{ left: `${positions[i]?.left}%`, top: `${positions[i]?.top}%` }}
               className={`
                 absolute w-16 h-16 md:w-20 md:h-20 rounded-full flex items-center justify-center font-black text-2xl transition-all duration-300 transform -translate-x-1/2 -translate-y-1/2 shadow-lg border-2
                 ${(gameState === 'showing' || gameState === 'playing') ? 'scale-100 opacity-100' : 'scale-0 opacity-0 pointer-events-none'}
+                
                 ${isCorrect ? 'bg-emerald-500 border-emerald-400 text-white shadow-[0_0_30px_rgba(16,185,129,0.6)] scale-110 z-10' : ''}
-                ${error && !correctNumbers.includes(num) ? 'bg-red-500 border-red-400 text-white animate-shake' : ''}
+                
+                ${/* UPDATED ERROR STYLING: Only the wrong clicked bubble turns red. No shake. */ ''}
+                ${error && isClicked && !isCorrect ? 'bg-red-500 border-red-400 text-white z-20' : ''}
+                
+                ${/* UPDATED: If error exists but this wasn't the clicked bubble, show neutral style but revealed */ ''}
+                ${error && !isClicked && !isCorrect ? 'bg-emerald-100 border-emerald-300 text-emerald-800 opacity-80' : ''}
+                
                 ${!isCorrect && !error ? 'bg-emerald-100 border-emerald-300 text-emerald-800 hover:bg-emerald-200' : ''}
                 ${isClicked && !isCorrect && !error ? 'opacity-50' : ''}
                 active:scale-95 cursor-pointer
@@ -483,6 +568,17 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
         })}
       </div>
 
+{/* {reconnectTimer !== null && (
+  <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-md z-[200] flex items-center justify-center">
+    <div className="bg-white p-8 rounded-3xl shadow-2xl text-center animate-pulse">
+      <Loader2 className="mx-auto mb-4 animate-spin text-emerald-500" />
+      <h2 className="text-xl font-black uppercase tracking-tighter">Opponent Disconnected</h2>
+      <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-2">
+        Waiting {reconnectTimer}s for reconnection...
+      </p>
+    </div>
+  </div>
+)} */}
       {/* --- OVERLAYS --- */}
       {/* 1. START SCREEN */}
       {gameState === 'idle' && mode === 'offline' && !showTutorial && !showRoundScreen && (
@@ -497,13 +593,19 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
           </div>
         </div>
       )}
+      
 
       {/* 2. ONLINE SYNCHRONIZING */}
       {gameState === 'idle' && mode === 'online' && !showRoundScreen && (
         <div className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-white/50 backdrop-blur-sm">
           <Loader2 className="w-8 h-8 text-emerald-500 animate-spin mb-4" />
           <p className="text-emerald-600 font-bold text-xs uppercase tracking-widest animate-pulse">{connectionStatus}</p>
-          <p className="text-slate-400 text-[10px] uppercase mt-2">Waiting for opponent...</p>
+          <p className="text-slate-500 text-xs font-bold px-4">
+    <span className="text-emerald-500">Syncing with server...</span>
+</p>
+<p className="text-slate-400 text-[10px] uppercase font-bold mt-1">
+    Verifying match results
+</p>
         </div>
       )}
 
@@ -537,87 +639,112 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
       )}
 
       {/* 4. GAME OVER */}
-      {gameState === 'gameover' && (
-        <div className="absolute inset-0 bg-white/80 backdrop-blur-lg flex items-center justify-center z-[100] p-6">
-          <div className="bg-white border border-slate-100 rounded-[3rem] p-10 max-w-sm w-full shadow-2xl text-center">
-            {waitingForResult ? (
-               <div className="py-10 animate-pulse">
-                  <div className="w-20 h-20 rounded-3xl bg-slate-100 flex items-center justify-center mx-auto mb-6 shadow-sm">
-                     <Clock size={40} className="text-slate-400" />
-                  </div>
-                  <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight mb-2">Wait...</h2>
-                  <p className="text-slate-500 text-xs font-bold px-4">
-                     <span className="text-emerald-500">{opponentName}</span> is still playing.
-                  </p>
-               </div>
-            ) : (
-               <>
-                <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg 
-                  ${isDraw ? 'bg-amber-100 text-amber-600' : (won ? 'bg-emerald-100 text-emerald-600' : 'bg-red-50 text-red-500')}
-                `}>
-                  {isDraw ? <MinusCircle size={40} /> : (won ? <Trophy size={40} /> : <X size={40} />)}
-                </div>
-                
-                <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter mb-2">
-                  {isDraw ? "Match Draw" : (won ? "Victory!" : "Defeat")}
-                </h2>
+     {/* --- PROFESSIONAL GAME OVER / WAITING OVERLAY --- */}
+{(waitingForResult || gameState === 'gameover') && (
+  <div className="absolute inset-0 bg-white/90 backdrop-blur-xl flex items-center justify-center z-[150] p-6 animate-in fade-in zoom-in duration-300">
+    <div className="bg-white border border-slate-100 rounded-[3rem] p-10 max-w-sm w-full shadow-[0_20px_50px_rgba(0,0,0,0.1)] text-center relative overflow-hidden">
+      
+      {/* Subtle background decorative element */}
+      <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-transparent via-emerald-500 to-transparent opacity-20" />
 
-                {isForfeit && (
-                  <p className="text-emerald-500 text-[10px] font-black uppercase tracking-widest mb-4 animate-bounce">
-                     {opponentName} fled the match!
-                  </p>
-                )}
-                
-                {mode === 'online' && (
-                  <p className={`text-xs font-black uppercase tracking-widest mb-6 
-                    ${isDraw ? 'text-amber-500' : (won ? 'text-emerald-500' : 'text-red-400')}
-                  `}>
-                    {isDraw ? 'Entry Fee Refunded' : (won ? 'Profit: +90 PKR' : 'Loss: -50 PKR')}
-                  </p>
-                )}
+      {waitingForResult ? (
+        /* --- WAITING STATE --- */
+        <div className="py-8 space-y-6">
+          <div className="relative w-24 h-24 mx-auto">
+            <div className="absolute inset-0 rounded-full border-4 border-slate-50 border-t-emerald-500 animate-spin" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Clock size={32} className="text-slate-300 animate-pulse" />
+            </div>
+          </div>
+          
+          <div className="space-y-2">
+            <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Syncing Result</h2>
+            <p className="text-slate-500 text-xs font-bold px-4 leading-relaxed">
+              Waiting for <span className="text-emerald-500">@{opponentName}</span> to finalize their sequence...
+            </p>
+          </div>
 
-                <div className="flex justify-center gap-8 my-8 pb-8 border-b border-slate-50">
-                  <div className="text-center">
-                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">You</span>
-                    <span className="text-2xl font-black text-slate-800">{score}</span>
-                  </div>
-                  {mode === 'online' && (
-                    <>
-                      <div className="w-px h-10 bg-slate-100 mt-2"></div>
-                      <div className="text-center">
-                        <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate max-w-[60px]">{opponentName}</span>
-                        <span className="text-2xl font-black text-slate-500">{opponentScore}</span>
-                      </div>
-                    </>
-                  )}
-                  {mode === 'offline' && (
-                    <>
-                      <div className="w-px h-10 bg-slate-100 mt-2"></div>
-                      <div className="text-center">
-                        <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Best</span>
-                        <span className="text-2xl font-black text-emerald-500">{highScore}</span>
-                      </div>
-                    </>
-                  )}
-                </div>
-                <div className="space-y-3">
-                  {mode === 'online' && (
-                    <button onClick={onRestart} className="w-full bg-emerald-500 text-white font-black py-4 rounded-xl shadow-lg shadow-emerald-200 transition-all uppercase tracking-widest text-xs flex items-center justify-center gap-2 hover:bg-emerald-600 active:scale-95">
-                      Find New Match <Play size={16}/>
-                    </button>
-                  )}
-                  <button onClick={() => { if (mode === 'offline') { startSoundRef.current?.play(); startGame(); } else { onQuit && onQuit(); } }} className="w-full bg-slate-900 hover:bg-black text-white font-black py-4 rounded-xl shadow-lg transition-all uppercase tracking-widest text-xs flex items-center justify-center gap-2">
-                    {mode === 'offline' ? 'Re-Initialize' : 'Return to Menu'} <RotateCcw size={16}/>
-                  </button>
-                  <button onClick={shareScore} className="w-full bg-emerald-50 text-emerald-600 font-black py-4 rounded-xl hover:bg-emerald-100 transition-all uppercase tracking-widest text-xs flex items-center justify-center gap-2">
-                    Share Data <Share2 size={16}/>
-                  </button>
-                </div>
-               </>
+          <div className="pt-4">
+             <div className="flex justify-center gap-1">
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" />
+             </div>
+          </div>
+        </div>
+      ) : (
+        /* --- FINAL RESULT STATE --- */
+        <div className="animate-in slide-in-from-bottom-4 duration-500">
+          <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg transform transition-transform hover:scale-110
+            ${isDraw ? 'bg-amber-100 text-amber-600' : (won ? 'bg-emerald-100 text-emerald-600' : 'bg-red-50 text-red-500')}
+          `}>
+            {isDraw ? <MinusCircle size={40} /> : (won ? <Trophy size={40} /> : <X size={40} />)}
+          </div>
+          
+          <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter mb-1">
+            {isDraw ? "Match Draw" : (won ? "Victory!" : "Defeat")}
+          </h2>
+
+          {isForfeit && (
+            <div className="inline-block px-3 py-1 bg-emerald-50 rounded-full mb-4">
+              <p className="text-emerald-600 text-[10px] font-black uppercase tracking-widest animate-pulse">
+                Opponent Disconnected
+              </p>
+            </div>
+          )}
+          
+          {mode === 'online' && (
+            <p className={`text-[11px] font-black uppercase tracking-[0.2em] mb-6 
+              ${isDraw ? 'text-amber-500' : (won ? 'text-emerald-500' : 'text-red-400')}
+            `}>
+              {isDraw ? 'Neutral Outcome • Refunded' : (won ? 'Earning: +90 PKR' : 'Loss: -50 PKR')}
+            </p>
+          )}
+
+          <div className="flex justify-center items-center gap-6 my-8 py-6 border-y border-slate-50">
+            <div className="text-center">
+              <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-1">Operator</span>
+              <span className="text-2xl font-black text-slate-800 leading-none">{score}</span>
+            </div>
+            
+            <div className="w-px h-8 bg-slate-100" />
+
+            <div className="text-center">
+              <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-1">
+                {mode === 'online' ? opponentName : 'Personal Best'}
+              </span>
+              <span className={`text-2xl font-black leading-none ${mode === 'offline' ? 'text-emerald-500' : 'text-slate-400'}`}>
+                {mode === 'online' ? opponentScore : highScore}
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {mode === 'online' && (
+              <button onClick={onRestart} className="w-full bg-emerald-500 text-white font-black py-4 rounded-2xl shadow-[0_10px_20px_rgba(16,185,129,0.2)] transition-all uppercase tracking-widest text-xs flex items-center justify-center gap-2 hover:bg-emerald-600 active:scale-[0.98]">
+                Find Next Match <Play size={16} fill="currentColor"/>
+              </button>
             )}
+            
+            <button 
+              onClick={() => { 
+                if (mode === 'offline') { startSoundRef.current?.play(); startGame(); } 
+                else { onQuit && onQuit(); } 
+              }} 
+              className="w-full bg-slate-900 hover:bg-black text-white font-black py-4 rounded-2xl shadow-lg transition-all uppercase tracking-widest text-xs flex items-center justify-center gap-2 active:scale-[0.98]"
+            >
+              {mode === 'offline' ? 'Re-Initialize' : 'Return to Menu'} <RotateCcw size={16}/>
+            </button>
+
+            <button onClick={shareScore} className="w-full bg-slate-50 text-slate-500 font-bold py-3 rounded-xl hover:bg-slate-100 transition-all uppercase tracking-widest text-[10px] flex items-center justify-center gap-2">
+              Export Stats <Share2 size={14}/>
+            </button>
           </div>
         </div>
       )}
+    </div>
+  </div>
+)}
 
       {/* 5. PAUSE MENU */}
       {showMenu && (
@@ -659,11 +786,6 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
           Perfect!
         </div>
       )}
-
-      <style jsx>{`
-        @keyframes shake { 0%, 100% { transform: translate(-50%, -50%); } 25% { transform: translate(-52%, -50%); } 75% { transform: translate(-48%, -50%); } }
-        .animate-shake { animation: shake 0.4s ease-in-out; }
-      `}</style>
     </div>
   );
 };

@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import Navbar from './Navbar';
 import Leaderboard from './Leaderboard';
 import RecentMatches from './RecentMatches';
-import { Target, Play, Zap, Crown, Trophy, X, DollarSign, UserCheck, Smartphone, Hash, Banknote, CheckCircle2, Wallet } from 'lucide-react';
+import { Target, Play, Zap, Crown, Trophy, X, DollarSign, UserCheck, Smartphone, Hash, Banknote, CheckCircle2, Wallet, Lock } from 'lucide-react';
 
 export default function DashboardPage({ user, onStartGame, onStartOffline, onLogout }) {
   const [stats, setStats] = useState({ top_players: [], global_stats: { total_pool: 0 } });
@@ -19,17 +19,54 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
   const [withdrawData, setWithdrawData] = useState({ amount: "", method: "Easypaisa", accountNumber: "", accountName: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    fetchStats();
-  }, []);
+  // 1. 🚀 NEW: State to track local user data for instant UI updates
+  const [localUser, setLocalUser] = useState(user);
+
+  // Run once on mount to get global stats
+useEffect(() => {
+  fetchStats();
+  
+  // Optional: Refresh stats every 30 seconds instead of every second
+  const interval = setInterval(fetchStats, 30000);
+  return () => clearInterval(interval);
+}, []);
+
+// Only update local user when the prop from the parent changes
+useEffect(() => {
+  if (user) {
+    setLocalUser(user);
+  }
+}, [user]);
+
+  // Check Balance Logic
+  const currentBalance = localUser?.wallet_balance || 0;
+  const canPlayRanked = currentBalance >= 50;
 
   const fetchStats = async () => {
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/leaderboard/stats`);
       const data = await res.json();
       setStats(data);
-    } catch (err) { console.error(err); } 
-    finally { setLoading(false); }
+    } catch (err) { 
+      console.error("Leaderboard fetch failed", err); 
+    } finally { 
+      setLoading(false); 
+    }
+  };
+
+  // 2. 🚀 NEW: Function to refresh user profile data after financial actions
+  const refreshUser = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setLocalUser(data);
+      }
+    } catch (err) { console.error(err); }
   };
 
   const handleDeposit = async (e) => {
@@ -72,9 +109,6 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
 
   const handleWithdraw = async (e) => {
     e.preventDefault();
-    
-    // Safety check: ensure user object exists before checking balance
-    const currentBalance = user?.wallet_balance || 0;
     const withdrawAmount = Number(withdrawData.amount);
     
     if (withdrawAmount <= 0) return alert("Please enter a valid amount");
@@ -103,8 +137,8 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
       if (res.ok) {
         alert("Withdrawal request sent!");
         setShowWithdrawModal(false);
-        // Ideally, call a parent function to refresh user data here instead of reload
-        window.location.reload(); 
+        // 🚀 Smoothly refresh instead of reload
+        refreshUser();
       } else { 
         const errorData = await res.json();
         alert(errorData.detail || "Withdrawal failed."); 
@@ -119,7 +153,6 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
   return (
     <div className="min-h-screen bg-[#fcfdfd] text-slate-800 p-4 md:p-8 relative">
       
-      {/* Toast Notification - High Z-Index to appear over everything */}
       {showSuccessToast && (
         <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[200] bg-slate-900 text-white px-6 py-4 rounded-3xl shadow-2xl flex items-center gap-4 animate-in fade-in slide-in-from-top-4 w-[90%] max-w-sm">
           <CheckCircle2 size={24} className="text-emerald-400 shrink-0" />
@@ -127,10 +160,9 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
         </div>
       )}
 
-      {/* Main Content */}
       <div className="max-w-6xl mx-auto space-y-8 relative z-10">
         <Navbar 
-          user={user} 
+          user={localUser} 
           onDeposit={() => setShowDepositModal(true)} 
           onWithdraw={() => setShowWithdrawModal(true)} 
           onLogout={onLogout} 
@@ -138,21 +170,40 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <div className="lg:col-span-4 space-y-8">
-            {/* Battle Selection Card */}
             <div className="bg-white/90 backdrop-blur-xl border border-white rounded-[2.5rem] p-8 space-y-6 shadow-xl shadow-green-900/5">
               <div className="flex items-center gap-3 mb-2">
                 <Target className="text-green-500" size={20} />
                 <h2 className="text-sm font-black uppercase tracking-[0.3em] text-slate-400">Battle Selection</h2>
               </div>
-              <button onClick={onStartGame} className="w-full group relative overflow-hidden bg-gradient-to-r from-green-400 to-emerald-400 p-6 rounded-3xl transition-all hover:scale-[1.02] active:scale-95 shadow-lg shadow-emerald-200">
+              
+              {/* 🛑 MODIFIED RANKED BUTTON */}
+              <button 
+                onClick={onStartGame} 
+                disabled={!canPlayRanked}
+                className={`w-full group relative overflow-hidden p-6 rounded-3xl transition-all shadow-lg 
+                  ${canPlayRanked 
+                    ? "bg-gradient-to-r from-green-400 to-emerald-400 hover:scale-[1.02] active:scale-95 shadow-emerald-200" 
+                    : "bg-slate-100 cursor-not-allowed opacity-70 shadow-none border border-slate-200"
+                  }
+                `}
+              >
                 <div className="relative z-10 flex flex-col items-center gap-3">
-                  <Play className="fill-white text-white translate-x-1" size={32} />
+                  {canPlayRanked ? (
+                    <Play className="fill-white text-white translate-x-1" size={32} />
+                  ) : (
+                    <Lock className="text-slate-400" size={32} />
+                  )}
                   <div className="text-center">
-                    <span className="block text-xl font-black text-white uppercase tracking-tighter">Ranked Match</span>
-                    <span className="text-[10px] font-bold text-white uppercase tracking-widest opacity-90">Win 90 PKR • Entry 50 PKR</span>
+                    <span className={`block text-xl font-black uppercase tracking-tighter ${canPlayRanked ? "text-white" : "text-slate-400"}`}>
+                        {canPlayRanked ? "Ranked Match" : "Insufficient Funds"}
+                    </span>
+                    <span className={`text-[10px] font-bold uppercase tracking-widest ${canPlayRanked ? "text-white opacity-90" : "text-slate-400"}`}>
+                        {canPlayRanked ? "Win 90 PKR • Entry 50 PKR" : "Deposit required to play"}
+                    </span>
                   </div>
                 </div>
               </button>
+
               <button onClick={onStartOffline} className="w-full bg-white hover:bg-slate-50 border border-slate-100 p-6 rounded-3xl transition-all flex items-center justify-between group shadow-sm">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-green-50 rounded-2xl flex items-center justify-center text-green-400 group-hover:text-green-600 transition-colors"><Zap size={24} /></div>
@@ -164,7 +215,6 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
               </button>
             </div>
 
-            {/* Global Economy Card */}
             <div className="relative group overflow-hidden bg-white border border-white rounded-[2.5rem] p-8 shadow-xl shadow-green-900/5">
               <div className="relative z-10">
                 <div className="flex items-center gap-2 mb-4">
@@ -178,7 +228,8 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
               <div className="absolute -right-4 -bottom-4 opacity-[0.03] rotate-12 text-slate-900"><Trophy size={160} /></div>
             </div>
 
-            <RecentMatches matches={user?.recent_matches} />
+            {/* 🚀 Pass localUser to matches to ensure instant updates */}
+            <RecentMatches matches={localUser?.recent_matches || []} />
           </div>
 
           <div className="lg:col-span-8">

@@ -9,16 +9,13 @@ export default function Home() {
   const [user, setUser] = useState(null);
   const [matchSocket, setMatchSocket] = useState(null);
   const [gameMode, setGameMode] = useState('offline');
+  const [isConnecting, setIsConnecting] = useState(false);
   
   const matchmakingSocketRef = useRef(null);
 
-  // --- 📡 FETCH FRESH USER DATA ---
   const fetchUserData = async () => {
     const token = localStorage.getItem('token');
-    if (!token) {
-      setView('auth');
-      return;
-    }
+    if (!token) { setView('auth'); return; }
 
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`, {
@@ -32,8 +29,6 @@ export default function Home() {
       if (res.ok) {
         const freshUser = await res.json();
         setUser(freshUser);
-        localStorage.setItem('username', freshUser.username);
-        localStorage.setItem('wallet_balance', freshUser.wallet_balance);
         setView('dashboard');
       } else if (res.status === 401) {
         localStorage.removeItem('token');
@@ -41,25 +36,18 @@ export default function Home() {
       }
     } catch (err) {
       console.error("Fetch Error:", err);
-      const cachedUsername = localStorage.getItem('username');
-      if (cachedUsername) {
-        setUser({ username: cachedUsername, token, wallet_balance: localStorage.getItem('wallet_balance') || 0 });
-        setView('dashboard');
-      } else {
-        setView('auth');
-      }
+      setView('dashboard');
     }
   };
 
-  useEffect(() => {
-    fetchUserData();
-  }, []);
+  useEffect(() => { fetchUserData(); }, []);
 
   // --- 🔍 MATCHMAKING LOGIC ---
   const startOnlineMatch = () => {
     const token = localStorage.getItem('token');
-    if (!token) return setView('auth');
+    if (!token || isConnecting) return;
 
+    setIsConnecting(true);
     setView('searching');
     
     if (matchmakingSocketRef.current) {
@@ -70,38 +58,69 @@ export default function Home() {
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
     const WS_URL = API_URL.replace(/^http/, 'ws'); 
 
-    const mmWs = new WebSocket(`${WS_URL}/api/game/ws/matchmaking?token=${token}`);
-    matchmakingSocketRef.current = mmWs;
+    // 🚀 DELAY: 800ms to ensure Redis Lock is cleared on backend before new attempt
+    setTimeout(() => {
+      try {
+        const mmWs = new WebSocket(`${WS_URL}/api/game/ws/matchmaking?token=${token}`);
+        matchmakingSocketRef.current = mmWs;
 
-    mmWs.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.status === "MATCH_FOUND") {
-        const gameSocket = new WebSocket(`${WS_URL}/api/game/ws/match/${data.match_id}?token=${token}`);
-        setMatchSocket(gameSocket);
-        setGameMode('online');
-        setView('playing');
-        mmWs.close();
-      }
-      if (data.status === "TIMEOUT") {
-        alert("No opponent found. Try again!");
+        mmWs.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          
+          if (data.type === "MATCH_FOUND") {
+            const gameSocket = new WebSocket(`${WS_URL}/api/game/ws/match/${data.match_id}?token=${token}`);
+            setMatchSocket(gameSocket);
+            setGameMode('online');
+            setView('playing');
+            setIsConnecting(false);
+            mmWs.onmessage = null;
+            mmWs.close();
+          }
+
+          if (data.type === "ERROR") {
+            console.error("Matchmaking Error:", data.message);
+            
+            // 🛑 ADDED: Explicit User Alert for Insufficient Funds
+            if (data.message === "Insufficient Balance") {
+                alert("⚠️ Insufficient Funds! You need at least 50 PKR to play.");
+            } else if (data.message === "Session already active.") {
+                // Optional: Alert for session locks if needed
+                // alert("You are already in queue or playing elsewhere.");
+            }
+
+            setIsConnecting(false);
+            setView('dashboard');
+            mmWs.close();
+          }
+        };
+
+        mmWs.onerror = (err) => {
+          console.error("WebSocket Connection Failed. Resetting...");
+          setIsConnecting(false);
+          setView('dashboard');
+        };
+
+        mmWs.onclose = () => setIsConnecting(false);
+
+      } catch (err) {
+        setIsConnecting(false);
         setView('dashboard');
-        mmWs.close();
       }
-    };
-
-    mmWs.onerror = () => {
-      if (mmWs.readyState !== WebSocket.CLOSED) setView('dashboard');
-    };
+    }, 800); 
   };
 
-  // ✅ RESTORED CANCEL SEARCH FUNCTION
   const cancelSearch = () => {
-    if (matchmakingSocketRef.current) {
-        matchmakingSocketRef.current.onmessage = null; 
-        matchmakingSocketRef.current.close();
-    }
-    setView('dashboard');
-  };
+  if (matchmakingSocketRef.current) {
+      // Set the onmessage and onerror to null BEFORE closing
+      // to prevent them from firing during the shutdown process
+      matchmakingSocketRef.current.onmessage = null; 
+      matchmakingSocketRef.current.onerror = null; 
+      matchmakingSocketRef.current.close();
+      matchmakingSocketRef.current = null;
+  }
+  setIsConnecting(false);
+  setView('dashboard');
+};
 
   return (
     <main className="min-h-screen bg-[#fcfdfd] select-none text-slate-800">
@@ -114,15 +133,8 @@ export default function Home() {
 
       {view === 'auth' && (
         <Auth onLoginSuccess={(response) => { 
-          // Extract token whether it's top-level or nested
-          const token = response.access_token || (response.user && response.user.access_token);
-          if (token) {
-            localStorage.setItem('token', token);
-            setTimeout(() => fetchUserData(), 50); 
-          } else {
-            console.error("Auth Failure: No token found", response);
-            alert("Session could not be established.");
-          }
+          const token = response.access_token || response.user?.access_token;
+          if (token) { localStorage.setItem('token', token); fetchUserData(); }
         }} />
       )}
 
@@ -138,9 +150,9 @@ export default function Home() {
       {view === 'searching' && (
         <div className="flex flex-col items-center justify-center h-screen bg-[#fcfdfd]">
           <div className="w-16 h-16 border-4 border-slate-100 border-t-emerald-500 rounded-full animate-spin mb-10"></div>
-          <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">MatchMaking</h2>
-          <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-2">Searching...</p>
-          <button onClick={cancelSearch} className="mt-16 px-10 py-4 bg-white text-slate-400 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg border border-slate-100 active:scale-95">
+          <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">Matchmaking</h2>
+          <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-2 animate-pulse">Scanning for Opponents...</p>
+          <button onClick={cancelSearch} className="mt-16 px-10 py-4 bg-white text-slate-400 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg border border-slate-100 active:scale-95 transition-all">
             Cancel Search
           </button>
         </div>
@@ -150,11 +162,15 @@ export default function Home() {
         <BubbleGame 
           mode={gameMode} 
           socket={matchSocket} 
-          onRestart={() => { if(matchSocket) matchSocket.close(); setMatchSocket(null); startOnlineMatch(); }}
+          onRestart={() => { 
+            if(matchSocket) matchSocket.close(); 
+            setMatchSocket(null); 
+            setTimeout(() => startOnlineMatch(), 1000); 
+          }}
           onQuit={() => { 
             if(matchSocket) matchSocket.close(); 
             setMatchSocket(null); 
-            fetchUserData(); // Sync results
+            fetchUserData(); 
           }} 
         />
       )}

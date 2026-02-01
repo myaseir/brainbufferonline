@@ -1,14 +1,26 @@
+# Web Framework & Server
 fastapi
 uvicorn
+gunicorn
+
+# Database & Storage
 motor
 pymongo
+dnspython
+upstash-redis
+
+# Security & Authentication
 python-jose[cryptography]
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
+python-multipart
+
+# Configuration & Environment
 pydantic[email]
 pydantic-settings
 python-dotenv
+
+# Networking & Communications
 requests
+httpx
 websockets
-python-multipart
-dnspython

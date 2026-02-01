@@ -3,8 +3,8 @@ from pydantic import Field
 
 class Settings(BaseSettings):
     # 1. App Settings
-    PROJECT_NAME: str = "Glacia Labs - Brain Buffer"
-    VERSION: str = "1.1.0"
+    PROJECT_NAME: str = "Glacia Labs"
+    VERSION: str = "1.2.0"
     API_V1_STR: str = "/api" 
     
     # 2. Security
@@ -17,13 +17,15 @@ class Settings(BaseSettings):
     MONGO_URL: str = Field(default="mongodb://localhost:27017")
     DATABASE_NAME: str = "brain_buffer"
 
-    # 4. Redis Configuration
-    REDIS_URL: str = Field(default="redis://localhost:6379")
+    # 4. Scalable Redis Configuration (Upstash REST)
+    UPSTASH_REDIS_REST_URL: str = Field(default="")
+    UPSTASH_REDIS_REST_TOKEN: str = Field(default="")
 
-    # 5. Brevo Email Configuration (Replaces Resend)
-    # These will automatically load from your .env file
+    # 5. Brevo Email Configuration
+    # Leave these as empty strings; Pydantic will pull the real values from your .env
     BREVO_API_KEY: str = Field(default="") 
-    SENDER_EMAIL: str = Field(default="myaseir404@gmail.com")
+    SENDER_EMAIL: str = Field(default="support@glacialabs.com")
+    SENDER_NAME: str = Field(default="Glacia Labs")
 
     # 6. Environment Config
     model_config = SettingsConfigDict(
@@ -33,5 +35,4 @@ class Settings(BaseSettings):
         extra="ignore" 
     )
 
-# Create the settings instance
 settings = Settings()

@@ -3,8 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.mongodb import connect_to_mongo, close_mongo_connection
 from app.api import auth, wallet, game_ws, leaderboard, admin 
-from app.api.game_ws import active_matches
-from app.core.config import settings  # ✅ Import Settings
+from app.core.config import settings
 import logging
 import os
 
@@ -14,43 +13,33 @@ logger = logging.getLogger("uvicorn.error")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- Startup Logic ---
-    logger.info(f"🚀 {settings.PROJECT_NAME}: Initializing...")
+    # --- 🚀 STARTUP LOGIC ---
+    logger.info(f"Initializing {settings.PROJECT_NAME} v{settings.VERSION}...")
 
-    # 1. Check Email Config (Sanity Check)
-    if settings.BREVO_API_KEY:
-        logger.info("📧 Email Service: Brevo API (HTTP) Enabled")
-    else:
-        logger.warning("⚠️ Email Service: No API Key found! Emails will not send.")
+    # 1. Email Config Check
+    if not settings.BREVO_API_KEY:
+        logger.warning("⚠️ BREVO_API_KEY missing. Emails will not be sent.")
+    
+    # 2. Redis Config Check (Optional Sanity Check)
+    if not settings.UPSTASH_REDIS_REST_URL:
+        logger.error("❌ UPSTASH_REDIS_REST_URL missing. Matchmaking will fail.")
 
-    # 2. Database Connection
+    # 3. Database Connections
     try:
         await connect_to_mongo()
-        logger.info("✅ Database systems online.")
+        logger.info("✅ MongoDB Connection: Online")
     except Exception as e:
-        logger.error(f"❌ Startup Error: {e}")
+        logger.error(f"❌ Database Startup Error: {e}")
 
     yield
 
-    # --- Shutdown Logic ---
-    logger.info("⚠️ Server shutting down. Cleaning up active matches...")
-    if active_matches:
-        for match_id, match_data in list(active_matches.items()):
-            players = match_data.get("players", {})
-            for ws in list(players.values()):
-                try:
-                    await ws.send_json({
-                        "type": "SERVER_SHUTDOWN", 
-                        "message": "Match terminated due to server maintenance. Stakes refunded."
-                    })
-                    await ws.close()
-                except: 
-                    pass
-    
+    # --- 🛑 SHUTDOWN LOGIC ---
+    # In a stateless setup, we don't need to loop through matches here.
+    # Redis keeps the match state alive. 
     await close_mongo_connection()
-    logger.info("🛑 Glacia Connection: Offline.")
+    logger.info(f"🛑 {settings.PROJECT_NAME} Connection: Offline.")
 
-# ✅ Use settings for Title and Version
+# ✅ FastAPI Instance with Settings
 app = FastAPI(
     title=settings.PROJECT_NAME, 
     version=settings.VERSION, 
@@ -65,7 +54,6 @@ origins = [
     "http://127.0.0.1:3001",
     "https://brainbufferonline.vercel.app", 
     "https://admin-brainbuffer.vercel.app",
-    # Render's own health check sometimes needs the actual domain
     "https://brainbufferonline.onrender.com"
 ]
 
@@ -78,20 +66,11 @@ app.add_middleware(
 )
 
 # --- 🛣️ ROUTER REGISTRATION ---
-# Standard Auth
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
-
-# Wallet prefix matches your Frontend calls
-app.include_router(wallet.router, prefix="/api/wallet", tags=["Wallet-System"])
-
-# WebSocket routes for Game/Matchmaking
+app.include_router(wallet.router, prefix="/api/wallet", tags=["Wallet"])
 app.include_router(game_ws.router, prefix="/api/game", tags=["Game"])
-
-# Public Stats
 app.include_router(leaderboard.router, prefix="/api/leaderboard", tags=["Leaderboard"])
-
-# Secure Admin
-app.include_router(admin.router, prefix="/api/admin", tags=["System-Admin"])
+app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 
 @app.get("/")
 def read_root():
@@ -99,5 +78,5 @@ def read_root():
         "status": "Online", 
         "project": settings.PROJECT_NAME,
         "version": settings.VERSION, 
-        "environment": os.getenv("RENDER", "local_development")
+        "environment": "Production" if os.getenv("RENDER") else "Local Development"
     }
