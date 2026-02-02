@@ -92,6 +92,22 @@ const scoreRef = useRef(0);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [settings.music, isPaused, gameState]);
 
+useEffect(() => {
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible') {
+      // When the user comes back to the tab on their phone
+      if (mode === 'online' && (!socket || socket.readyState !== WebSocket.OPEN)) {
+        console.log("Mobile tab resumed. Reconnecting...");
+        // If the socket died while the phone was asleep, force a refresh
+        window.location.reload(); 
+      }
+    }
+  };
+
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+}, [mode, socket]);
+
   // --- SOCKET LOGIC ---
  useEffect(() => {
   if (mode === 'online' && socket) {
