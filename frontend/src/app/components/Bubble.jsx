@@ -434,8 +434,8 @@ const scoreRef = useRef(0);
 const handleClick = (num) => {
   if (gameState !== 'playing' || isPaused || error) return;
   if (processingClickRef.current.has(num)) return;
+  
   processingClickRef.current.add(num);
-
   const sorted = [...numbers].sort((a, b) => a - b);
   setClickedNumbers(prev => [...prev, num]);
 
@@ -448,7 +448,7 @@ const handleClick = (num) => {
     
     if (settings.sfx) correctAudioRef.current?.cloneNode().play().catch(() => {});
 
-    // Update Score Logic
+    // Calculate new score using Ref for instant accuracy
     const pointsPerPop = 10;
     const newScore = scoreRef.current + pointsPerPop;
     scoreRef.current = newScore; 
@@ -459,12 +459,12 @@ const handleClick = (num) => {
       setHighScore(newScore);
     }
 
-    // --- 🚀 ROUND COMPLETION LOGIC ---
+    // --- 🚀 ROUND COMPLETION LOGIC (Only runs when ALL numbers in round are popped) ---
     if (currentStepRef.current === sorted.length) {
       clearAllTimers();
 
-      // Check if it's the final round
       if (round >= maxRound) {
+        // Final Round Complete
         if (mode === 'online' && socket) {
           socket.send(JSON.stringify({ type: 'GAME_OVER', score: newScore }));
         }
@@ -473,18 +473,16 @@ const handleClick = (num) => {
         if (settings.sfx) winAudioRef.current?.play();
       } 
       else {
-        // Not the final round: Send a single update for the completed round
+        // Round Complete, move to next
         if (mode === 'online' && socket) {
           socket.send(JSON.stringify({ type: 'SCORE_UPDATE', score: newScore }));
         }
         
-        // Show "Perfect" feedback
         if (!error) {
           setShowPerfectRound(true);
           setTimeout(() => setShowPerfectRound(false), 1200);
         }
 
-        // Proceed to next round
         setRound(r => r + 1);
         setTimeout(() => startRound(round + 1), 1000);
       }
