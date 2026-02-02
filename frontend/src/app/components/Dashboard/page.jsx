@@ -3,9 +3,12 @@ import { useState, useEffect } from 'react';
 import Navbar from './Navbar';
 import Leaderboard from './Leaderboard';
 import RecentMatches from './RecentMatches';
+import FriendSidebar from './FriendSidebar';
+import LobbyListener from '../LobbyListener';
+
 import { Target, Play, Zap, Crown, Trophy, X, DollarSign, UserCheck, Smartphone, Hash, Banknote, CheckCircle2, Wallet, Lock } from 'lucide-react';
 
-export default function DashboardPage({ user, onStartGame, onStartOffline, onLogout }) {
+export default function DashboardPage({ user, onStartGame, onStartOffline, onLogout, onJoinChallenge }) {
   const [stats, setStats] = useState({ top_players: [], global_stats: { total_pool: 0 } });
   const [loading, setLoading] = useState(true);
   
@@ -13,32 +16,33 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
+  
+  // Friend Sidebar State
+  const [showFriends, setShowFriends] = useState(false);
+  
+  // 🔥 NEW: Track Request Count for Red Badge
+  const [requestCount, setRequestCount] = useState(0);
 
   // Form States
   const [depositData, setDepositData] = useState({ amount: "", fullName: "", senderNumber: "", trxId: "" });
   const [withdrawData, setWithdrawData] = useState({ amount: "", method: "Easypaisa", accountNumber: "", accountName: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // 1. 🚀 NEW: State to track local user data for instant UI updates
+  // User State
   const [localUser, setLocalUser] = useState(user);
 
-  // Run once on mount to get global stats
-useEffect(() => {
-  fetchStats();
-  
-  // Optional: Refresh stats every 30 seconds instead of every second
-  const interval = setInterval(fetchStats, 30000);
-  return () => clearInterval(interval);
-}, []);
+  useEffect(() => {
+    fetchStats();
+    const interval = setInterval(fetchStats, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
-// Only update local user when the prop from the parent changes
-useEffect(() => {
-  if (user) {
-    setLocalUser(user);
-  }
-}, [user]);
+  useEffect(() => {
+    if (user) {
+      setLocalUser(user);
+    }
+  }, [user]);
 
-  // Check Balance Logic
   const currentBalance = localUser?.wallet_balance || 0;
   const canPlayRanked = currentBalance >= 50;
 
@@ -54,7 +58,6 @@ useEffect(() => {
     }
   };
 
-  // 2. 🚀 NEW: Function to refresh user profile data after financial actions
   const refreshUser = async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -137,7 +140,6 @@ useEffect(() => {
       if (res.ok) {
         alert("Withdrawal request sent!");
         setShowWithdrawModal(false);
-        // 🚀 Smoothly refresh instead of reload
         refreshUser();
       } else { 
         const errorData = await res.json();
@@ -153,6 +155,16 @@ useEffect(() => {
   return (
     <div className="min-h-screen bg-[#fcfdfd] text-slate-800 p-4 md:p-8 relative">
       
+      <LobbyListener onJoinChallenge={onJoinChallenge} />
+
+      {/* ✅ PASS 'onRequestCountChange' TO UPDATE BADGE */}
+      <FriendSidebar 
+        isOpen={showFriends} 
+        onClose={() => setShowFriends(false)} 
+        currentUser={localUser}
+        onRequestCountChange={(count) => setRequestCount(count)}
+      />
+
       {showSuccessToast && (
         <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[200] bg-slate-900 text-white px-6 py-4 rounded-3xl shadow-2xl flex items-center gap-4 animate-in fade-in slide-in-from-top-4 w-[90%] max-w-sm">
           <CheckCircle2 size={24} className="text-emerald-400 shrink-0" />
@@ -165,7 +177,11 @@ useEffect(() => {
           user={localUser} 
           onDeposit={() => setShowDepositModal(true)} 
           onWithdraw={() => setShowWithdrawModal(true)} 
-          onLogout={onLogout} 
+          onLogout={onLogout}
+          onOpenFriends={() => setShowFriends(true)}
+          
+          // ✅ PASS COUNT TO NAVBAR
+          requestCount={requestCount}
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -176,7 +192,6 @@ useEffect(() => {
                 <h2 className="text-sm font-black uppercase tracking-[0.3em] text-slate-400">Battle Selection</h2>
               </div>
               
-              {/* 🛑 MODIFIED RANKED BUTTON */}
               <button 
                 onClick={onStartGame} 
                 disabled={!canPlayRanked}
@@ -209,7 +224,7 @@ useEffect(() => {
                   <div className="w-12 h-12 bg-green-50 rounded-2xl flex items-center justify-center text-green-400 group-hover:text-green-600 transition-colors"><Zap size={24} /></div>
                   <div className="text-left">
                     <span className="block text-sm font-black text-slate-800 uppercase tracking-tight">Practice Arena</span>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">No stakes • Training</span>
+                    <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">No stakes • Training</span>
                   </div>
                 </div>
               </button>
@@ -228,7 +243,6 @@ useEffect(() => {
               <div className="absolute -right-4 -bottom-4 opacity-[0.03] rotate-12 text-slate-900"><Trophy size={160} /></div>
             </div>
 
-            {/* 🚀 Pass localUser to matches to ensure instant updates */}
             <RecentMatches matches={localUser?.recent_matches || []} />
           </div>
 

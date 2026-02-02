@@ -1,12 +1,12 @@
 "use client";
-import { User, PlusCircle, ArrowUpRight, LogOut } from 'lucide-react';
+import { User, PlusCircle, ArrowUpRight, LogOut, Users } from 'lucide-react';
 
-export default function Navbar({ user, onDeposit, onWithdraw, onLogout }) {
+// 1. Added 'requestCount' to props
+export default function Navbar({ user, onDeposit, onWithdraw, onLogout, onOpenFriends, requestCount }) {
   return (
     <header className="flex flex-col md:flex-row justify-between items-center gap-4 md:gap-6 bg-white/80 backdrop-blur-xl border border-white p-4 md:p-6 rounded-3xl shadow-lg shadow-green-900/5 overflow-hidden">
       
       {/* 1. User Profile Section */}
-      {/* Mobile: Centered | Desktop: Left Aligned */}
       <div className="flex items-center gap-4 w-full md:w-auto justify-center md:justify-start">
         <div className="relative shrink-0">
           <div className="w-14 h-14 md:w-16 md:h-16 bg-gradient-to-tr from-green-400 to-emerald-300 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-green-200">
@@ -29,7 +29,6 @@ export default function Navbar({ user, onDeposit, onWithdraw, onLogout }) {
       <div className="flex flex-col md:flex-row items-center gap-4 w-full md:w-auto">
         
         {/* 2. Wallet Balance */}
-        {/* Mobile: Centered on its own row | Desktop: Aligned Right with border */}
         <div className="flex flex-col items-center md:items-end px-0 md:px-6 md:border-r border-slate-100 w-full md:w-auto">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-1">Wallet Balance</span>
           <div className="flex items-center gap-1">
@@ -38,8 +37,7 @@ export default function Navbar({ user, onDeposit, onWithdraw, onLogout }) {
           </div>
         </div>
 
-        {/* 3. Action Buttons (Deposit, Withdraw, Logout) */}
-        {/* Mobile: Centered Row at bottom | Desktop: Aligned Right */}
+        {/* 3. Action Buttons */}
         <div className="flex items-center justify-center gap-2 w-full md:w-auto">
           <button 
             onClick={onDeposit} 
@@ -55,9 +53,26 @@ export default function Navbar({ user, onDeposit, onWithdraw, onLogout }) {
             <ArrowUpRight size={14}/> Withdraw
           </button>
 
+          {/* 🔥 NEW: Friends Button with Notification Badge */}
+          <button 
+            onClick={onOpenFriends} 
+            className="p-3 bg-slate-50 hover:bg-emerald-50 hover:text-emerald-500 border border-slate-100 rounded-xl transition-all shadow-sm flex items-center justify-center shrink-0 group relative"
+            title="Friends"
+          >
+            <Users size={20} />
+            
+            {/* 🔴 THE RED BADGE */}
+            {requestCount > 0 && (
+              <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-black flex items-center justify-center rounded-full border-2 border-white animate-bounce shadow-sm">
+                {requestCount}
+              </div>
+            )}
+          </button>
+
           <button 
             onClick={onLogout} 
             className="p-3 bg-slate-50 hover:bg-red-50 hover:text-red-500 border border-slate-100 rounded-xl transition-all shadow-sm flex items-center justify-center shrink-0"
+            title="Logout"
           >
             <LogOut size={20} />
           </button>

@@ -17,12 +17,15 @@ class Settings(BaseSettings):
     MONGO_URL: str = Field(default="mongodb://localhost:27017")
     DATABASE_NAME: str = "brain_buffer"
 
-    # 4. Scalable Redis Configuration (Upstash REST)
+    # 4. Redis Configuration (Standard + Upstash)
+    # ✅ FIX: This was missing and caused the crash in main.py
+    REDIS_URL: str = Field(default="redis://localhost:6379/0")
+    
+    # Legacy Upstash (Optional)
     UPSTASH_REDIS_REST_URL: str = Field(default="")
     UPSTASH_REDIS_REST_TOKEN: str = Field(default="")
 
     # 5. Brevo Email Configuration
-    # Leave these as empty strings; Pydantic will pull the real values from your .env
     BREVO_API_KEY: str = Field(default="") 
     SENDER_EMAIL: str = Field(default="support@glacialabs.com")
     SENDER_NAME: str = Field(default="Glacia Labs")

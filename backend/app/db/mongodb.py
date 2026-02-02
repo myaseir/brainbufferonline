@@ -25,7 +25,13 @@ class MongoDB:
     @db.setter
     def db(self, value):
         self._db = value
-
+    
+    def get_collection(self, name: str):
+        """
+        Helper to retrieve a collection.
+        This fixes the 'AttributeError: MongoDB object has no attribute get_collection'
+        """
+        return self.db[name]
 # Singleton instance
 db = MongoDB()
 

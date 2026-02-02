@@ -2,7 +2,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.mongodb import connect_to_mongo, close_mongo_connection
-from app.api import auth, wallet, game_ws, leaderboard, admin 
+# ✅ UPDATED IMPORTS: Added 'friends' and 'lobby'
+from app.api import auth, wallet, game_ws, leaderboard, admin, friends, lobby 
 from app.core.config import settings
 import logging
 import os
@@ -20,9 +21,10 @@ async def lifespan(app: FastAPI):
     if not settings.BREVO_API_KEY:
         logger.warning("⚠️ BREVO_API_KEY missing. Emails will not be sent.")
     
-    # 2. Redis Config Check (Optional Sanity Check)
-    if not settings.UPSTASH_REDIS_REST_URL:
-        logger.error("❌ UPSTASH_REDIS_REST_URL missing. Matchmaking will fail.")
+    # 2. Redis Config Check
+    # (Updated to check standard REDIS_URL if you are using the new setup)
+    if not settings.REDIS_URL and not settings.UPSTASH_REDIS_REST_URL:
+        logger.error("❌ REDIS_URL missing. Matchmaking will fail.")
 
     # 3. Database Connections
     try:
@@ -34,8 +36,6 @@ async def lifespan(app: FastAPI):
     yield
 
     # --- 🛑 SHUTDOWN LOGIC ---
-    # In a stateless setup, we don't need to loop through matches here.
-    # Redis keeps the match state alive. 
     await close_mongo_connection()
     logger.info(f"🛑 {settings.PROJECT_NAME} Connection: Offline.")
 
@@ -71,6 +71,10 @@ app.include_router(wallet.router, prefix="/api/wallet", tags=["Wallet"])
 app.include_router(game_ws.router, prefix="/api/game", tags=["Game"])
 app.include_router(leaderboard.router, prefix="/api/leaderboard", tags=["Leaderboard"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
+
+# ✅ NEW ROUTERS ADDED HERE
+app.include_router(friends.router, prefix="/api/friends", tags=["Friends"])
+app.include_router(lobby.router, tags=["Lobby"]) # Handles /ws/lobby
 
 @app.get("/")
 def read_root():

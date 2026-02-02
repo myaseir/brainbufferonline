@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import Auth from './components/Auth';
 import Dashboard from './components/Dashboard/page';
 import BubbleGame from './components/Bubble'; 
-
+import { Toaster } from 'react-hot-toast';
 export default function Home() {
   const [view, setView] = useState('loading');
   const [user, setUser] = useState(null);
@@ -42,6 +42,23 @@ export default function Home() {
 
   useEffect(() => { fetchUserData(); }, []);
 
+  // --- 🚀 NEW: DIRECT CHALLENGE JOINER ---
+  // This function skips matchmaking and connects directly to a specific Match ID
+  const joinChallengeMatch = (matchId) => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+    const WS_URL = API_URL.replace(/^http/, 'ws'); 
+
+    // Connect directly to the Game Room
+    const gameSocket = new WebSocket(`${WS_URL}/api/game/ws/match/${matchId}?token=${token}`);
+    
+    setMatchSocket(gameSocket);
+    setGameMode('online'); // Challenges are always online
+    setView('playing');    // Switch view immediately
+  };
+
   // --- 🔍 MATCHMAKING LOGIC ---
   const startOnlineMatch = () => {
     const token = localStorage.getItem('token');
@@ -58,7 +75,6 @@ export default function Home() {
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
     const WS_URL = API_URL.replace(/^http/, 'ws'); 
 
-    // 🚀 DELAY: 800ms to ensure Redis Lock is cleared on backend before new attempt
     setTimeout(() => {
       try {
         const mmWs = new WebSocket(`${WS_URL}/api/game/ws/matchmaking?token=${token}`);
@@ -79,15 +95,9 @@ export default function Home() {
 
           if (data.type === "ERROR") {
             console.error("Matchmaking Error:", data.message);
-            
-            // 🛑 ADDED: Explicit User Alert for Insufficient Funds
             if (data.message === "Insufficient Balance") {
                 alert("⚠️ Insufficient Funds! You need at least 50 PKR to play.");
-            } else if (data.message === "Session already active.") {
-                // Optional: Alert for session locks if needed
-                // alert("You are already in queue or playing elsewhere.");
             }
-
             setIsConnecting(false);
             setView('dashboard');
             mmWs.close();
@@ -110,21 +120,25 @@ export default function Home() {
   };
 
   const cancelSearch = () => {
-  if (matchmakingSocketRef.current) {
-      // Set the onmessage and onerror to null BEFORE closing
-      // to prevent them from firing during the shutdown process
+    if (matchmakingSocketRef.current) {
       matchmakingSocketRef.current.onmessage = null; 
       matchmakingSocketRef.current.onerror = null; 
       matchmakingSocketRef.current.close();
       matchmakingSocketRef.current = null;
-  }
-  setIsConnecting(false);
-  setView('dashboard');
-};
+    }
+    setIsConnecting(false);
+    setView('dashboard');
+  };
 
   return (
     <main className="min-h-screen bg-[#fcfdfd] select-none text-slate-800">
-      
+      <Toaster 
+        position="top-center" 
+        reverseOrder={false}
+        containerStyle={{
+           zIndex: 99999 // This forces it to be ON TOP of the sidebar
+        }}
+      />
       {view === 'loading' && (
         <div className="flex items-center justify-center h-screen">
           <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
@@ -144,6 +158,9 @@ export default function Home() {
           onStartGame={startOnlineMatch} 
           onStartOffline={() => { setGameMode('offline'); setMatchSocket(null); setView('playing'); }} 
           onLogout={() => { localStorage.clear(); setUser(null); setView('auth'); }} 
+          
+          // ✅ PASS THIS PROP DOWN
+          onJoinChallenge={joinChallengeMatch} 
         />
       )}
 
