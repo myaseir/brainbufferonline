@@ -110,37 +110,21 @@ const sendChallenge = async (targetId, username) => {
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [settings.music, isPaused, gameState]);
 
-// Replace the existing useEffect (around lines 80-100)
 useEffect(() => {
-  let reconnectTimeout = null;
-  
   const handleVisibilityChange = () => {
     if (document.visibilityState === 'visible') {
-      // On mobile resume, try to reconnect WebSocket instead of reloading
+      // When the user comes back to the tab on their phone
       if (mode === 'online' && (!socket || socket.readyState !== WebSocket.OPEN)) {
-        console.log("Mobile tab resumed. Attempting reconnection...");
-        setConnectionStatus('Reconnecting...');
-        // Assume you have a function to create/reconnect the socket (e.g., from parent component)
-        // If not, add: reconnectSocket(); // Custom reconnect logic
-        reconnectTimeout = setTimeout(() => {
-          if (!socket || socket.readyState !== WebSocket.OPEN) {
-            alert('Connection lost. Please refresh the page.'); // Fallback if reconnect fails
-          }
-        }, 5000); // Wait 5s for reconnect
+        console.log("Mobile tab resumed. Reconnecting...");
+        // If the socket died while the phone was asleep, force a refresh
+        window.location.reload(); 
       }
-    } else {
-      // On hide, pause audio (keep existing logic)
-      if (bgMusicInstance) bgMusicInstance.pause();
-      if (tickAudioRef.current) { tickAudioRef.current.pause(); tickAudioRef.current.currentTime = 0; }
     }
   };
-  
+
   document.addEventListener("visibilitychange", handleVisibilityChange);
-  return () => {
-    document.removeEventListener("visibilitychange", handleVisibilityChange);
-    if (reconnectTimeout) clearTimeout(reconnectTimeout);
-  };
-}, [mode, socket, settings.music, isPaused, gameState]);
+  return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+}, [mode, socket]);
 
   // --- SOCKET LOGIC ---
  useEffect(() => {
@@ -162,103 +146,82 @@ useEffect(() => {
       else sendReady();
     }, 1000);
 
-   const handleSocketMessage = (event) => {
-  try {
-    const data = JSON.parse(event.data);
-    
-    if (data.type === 'GAME_START') { 
-      clearInterval(readyInterval); 
-      serverRoundsRef.current = data.rounds; 
-      if (data.opponent_name) setOpponentName(data.opponent_name);
-      setScore(data.your_current_score || 0);
-      scoreRef.current = data.your_current_score || 0;
-      setOpponentScore(data.op_current_score || 0);
-      setConnectionStatus('Match Starting...');
-      startGame();
-    } 
-    else if (data.type === 'WAITING_FOR_OPPONENT') {
-      // 🔥 Handle the 10s grace period
-      setReconnectTimer(data.seconds_left);
-    }
-    else if (data.type === 'SYNC_STATE') {
-      setReconnectTimer(null); // Clear timer once opponent is back
-      setOpponentScore(data.opponent_score);
-      // Fixed: Check if your_score is defined and greater than current
-      if (data.your_score !== undefined && data.your_score > scoreRef.current) {
-        setScore(data.your_score);
-        scoreRef.current = data.your_score;
-      }
-    }
-    else if (data.type === 'MATCH_ABORTED') {
-      clearInterval(readyInterval);
-      const leaver = data.leaver_name || 'Opponent';
-      setConnectionStatus(`${leaver} left. Refunded.`); 
-      setTimeout(() => { if (onRequeue) onRequeue(); else if (onQuit) onQuit(); }, 2000);
-    }
-    else if (data.type === 'OPPONENT_FORFEIT') {
-      setWon(true);
-      setIsDraw(false);
-      setWaitingForResult(false); 
-      setIsForfeit(true); 
-      if (data.leaver_name) setOpponentName(data.leaver_name); 
-      handleGameOver(true); 
-    }
-    else if (data.type === 'RESULT') {
-      // 1. Immediately stop the "Waiting" spinner
-      console.log('RESULT Message Received:', data);
-      if (waitingTimeoutRef.current) {
-        clearTimeout(waitingTimeoutRef.current);
-        waitingTimeoutRef.current = null;
-      }
+    const handleSocketMessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'GAME_START') { 
+          clearInterval(readyInterval); 
+          serverRoundsRef.current = data.rounds; 
+          if(data.opponent_name) setOpponentName(data.opponent_name);
+          setScore(data.your_current_score || 0);
+          scoreRef.current = data.your_current_score || 0;
+          setOpponentScore(data.op_current_score || 0);
+          setConnectionStatus('Match Starting...');
+          startGame();
+        } 
+        else if (data.type === 'WAITING_FOR_OPPONENT') {
+          // 🔥 Handle the 10s grace period
+          setReconnectTimer(data.seconds_left);
+        }
+        else if (data.type === 'SYNC_STATE') {
+          setReconnectTimer(null); // Clear timer once opponent is back
+          setOpponentScore(data.opponent_score);
+          // Fixed: Check if your_score is defined
+          if (data.your_score !== undefined && data.your_score > scoreRef.current){
+            setScore(data.your_score);
+            scoreRef.current = data.your_score;
+          }
+        }
+        else if (data.type === 'MATCH_ABORTED') {
+          clearInterval(readyInterval);
+          const leaver = data.leaver_name || 'Opponent';
+          setConnectionStatus(`${leaver} left. Refunded.`); 
+          setTimeout(() => { if (onRequeue) onRequeue(); else if (onQuit) onQuit(); }, 2000);
+        }
+        else if (data.type === 'OPPONENT_FORFEIT') {
+          setWon(true);
+          setIsDraw(false);
+          setWaitingForResult(false); 
+          setIsForfeit(true); 
+          if(data.leaver_name) setOpponentName(data.leaver_name); 
+          handleGameOver(true); 
+        }
+        else if (data.type === 'RESULT') {
+          // 1. Immediately stop the "Waiting" spinner
+          console.log('RESULT Message Received:', data);
+          if (waitingTimeoutRef.current) {
+            clearTimeout(waitingTimeoutRef.current);
+            waitingTimeoutRef.current = null;
+          }
+ 
+          setWaitingForResult(false);
+          
+          // 2. Update scores from the server for consistency
+          setScore(data.my_score);
+          scoreRef.current = data.my_score;
+          setOpponentScore(data.op_score);
+          
+          // 3. Set the outcome
+          if (data.status === "DRAW") {
+            setIsDraw(true);
+            setWon(false);
+          } else if (data.status === "WON") {
+            setWon(true);
+            setIsDraw(false);
+          } else {
+            setWon(false);
+            setIsDraw(false);
+          }
 
-      setWaitingForResult(false);
-      
-      // 2. Update scores from the server for consistency
-      setScore(data.my_score);
-      scoreRef.current = data.my_score;
-      setOpponentScore(data.op_score);
-      
-      // 3. Set the outcome
-      if (data.status === "DRAW") {
-        setIsDraw(true);
-        setWon(false);
-      } else if (data.status === "WON") {
-        setWon(true);
-        setIsDraw(false);
-      } else {
-        setWon(false);
-        setIsDraw(false);
-      }
-
-      // 4. Move to Game Over screen
-      setGameState('gameover');
-      
-      // 5. Clean up any remaining game sounds/timers
-      clearAllTimers();
-    }
-    // 🚀 NEW: Handle presence broadcasts from backend (for real-time online status)
-    else if (data.type === 'USER_ONLINE') {
-      // Update online users list (assuming you have a state for it)
-      // setOnlineUsers(prev => [...new Set([...prev, data.user_id])]);
-      console.log(`${data.user_id} is now online`);
-    }
-    else if (data.type === 'USER_AWAY' || data.type === 'USER_OFFLINE') {
-      // Update online users list (remove user)
-      // setOnlineUsers(prev => prev.filter(id => id !== data.user_id));
-      console.log(`${data.user_id} is now ${data.type === 'USER_AWAY' ? 'away' : 'offline'}`);
-    }
-    // 🚀 NEW: Handle incoming challenges (for match requests)
-    else if (data.type === 'INCOMING_CHALLENGE') {
-      // Show challenge notification to user
-      // Example: setShowChallengeModal(true); setChallengerData(data);
-      console.log(`Challenge from ${data.challenger_name} (${data.challenger_id}) for ${data.bet_amount} PKR`);
-      // You can add UI logic here, e.g., a modal to accept/reject
-    }
-  } catch (err) {
-    console.error("Socket Error:", err);
-    setConnectionStatus('Connection error. Retrying...');
-  }
-};
+          // 4. Move to Game Over screen
+          setGameState('gameover');
+          
+          // 5. Clean up any remaining game sounds/timers
+          clearAllTimers();
+        }
+      } catch (err) { console.error("Socket Error:", err); }
+    };
 
     socket.addEventListener('message', handleSocketMessage);
     return () => {
@@ -267,34 +230,6 @@ useEffect(() => {
     };
   }
 }, [mode, socket]);
-
-// Add this new useEffect (after the socket useEffect, around lines 150-200)
-useEffect(() => {
-  if (mode === 'online') {
-    const pollPresence = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        const response = await fetch(`/presence/online`, {
-          headers: { 'Authorization': `Bearer ${token}` } // If needed
-        });
-        if (response.ok) {
-          const data = await response.json();
-          // Update a state for online users (e.g., setOnlineUsers(data.online_users))
-          // Display this in your UI (e.g., in a sidebar or navbar)
-          console.log('Online users:', data.online_users);
-        }
-      } catch (e) {
-        console.error('Presence poll failed');
-      }
-    };
-    
-    // Poll every 30 seconds
-    const interval = setInterval(pollPresence, 30000);
-    pollPresence(); // Initial poll
-    
-    return () => clearInterval(interval);
-  }
-}, [mode]);
   useEffect(() => {
       const savedHighScore = parseInt(localStorage.getItem('highScore')) || 0;
       const tutorialSeen = localStorage.getItem('tutorialSeen') === 'true';
@@ -303,7 +238,6 @@ useEffect(() => {
       return () => clearAllTimers();
   }, []);
   
-
   const clearAllTimers = useCallback(() => {
       if (roundTimerRef.current) clearInterval(roundTimerRef.current);
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
@@ -884,6 +818,5 @@ const handleClick = (num) => {
     </div>
   );
 };
-// Add to the end of the file (before export)
 
 export default BubbleGame;

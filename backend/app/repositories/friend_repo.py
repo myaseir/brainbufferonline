@@ -1,71 +1,117 @@
-import asyncio
 from app.db.mongodb import db
-from app.db.redis import redis_client
 from bson import ObjectId
 from datetime import datetime
 
 class FriendRepository:
     def __init__(self):
+        # We use the helper we added to MongoDB class
         self.collection = db.get_collection("friendships")
         self.users = db.get_collection("users")
 
-    # ... send_request, accept_request, search_users, decline_request remain the same ...
+    async def send_request(self, requester_id: str, recipient_username: str):
+        # 1. Find Recipient
+        recipient = await self.users.find_one({"username": recipient_username})
+        if not recipient:
+            return {"error": "User not found"}
+        
+        recipient_id = str(recipient["_id"])
+        if recipient_id == requester_id:
+            return {"error": "You cannot add yourself"}
+
+        # 2. Check existing relationship
+        existing = await self.collection.find_one({
+            "$or": [
+                {"requester_id": requester_id, "recipient_id": recipient_id},
+                {"requester_id": recipient_id, "recipient_id": requester_id}
+            ]
+        })
+        
+        if existing:
+            if existing["status"] == "accepted":
+                return {"error": "Already friends"}
+            if existing["status"] == "pending":
+                return {"error": "Request already pending"}
+
+        # 3. Create Request
+        await self.collection.insert_one({
+            "requester_id": requester_id,
+            "recipient_id": recipient_id,
+            "status": "pending",
+            "created_at": datetime.utcnow()
+        })
+        return {"message": "Friend request sent"}
+
+    async def accept_request(self, request_id: str, user_id: str):
+        # Only the recipient can accept
+        result = await self.collection.update_one(
+            {"_id": ObjectId(request_id), "recipient_id": user_id, "status": "pending"},
+            {"$set": {"status": "accepted"}}
+        )
+        return result.modified_count > 0
 
     async def get_friends(self, user_id: str):
-        """
-        🚀 BATTLE-READY: Fetches profiles from MongoDB AND presence from Redis in bulk.
-        """
-        # 1. Get all accepted friendship docs (MongoDB)
+        # Find all accepted friendships where user is either requester OR recipient
         cursor = self.collection.find({
             "$or": [{"requester_id": user_id}, {"recipient_id": user_id}],
             "status": "accepted"
         })
         
-        friendship_docs = await cursor.to_list(length=200)
-        if not friendship_docs:
-            return []
-
-        # 2. Extract unique friend IDs
-        friend_ids = []
-        for doc in friendship_docs:
-            fid = doc["recipient_id"] if doc["requester_id"] == user_id else doc["requester_id"]
-            friend_ids.append(ObjectId(fid))
-
-        # 3. BATCH QUERY: Fetch all profiles from MongoDB
-        profiles = await self.users.find({"_id": {"$in": friend_ids}}).to_list(length=200)
-        
-        # 🚀 4. REDIS BATCH CHECK: Decide who gets a green dot
-        # We build a list of keys like ['presence:id1', 'presence:id2']
-        presence_keys = [f"presence:{str(p['_id'])}" for p in profiles]
-        
-        # Use asyncio.to_thread for the synchronous redis client
-        # MGET returns a list of values (e.g., ["online", None, "online"])
-        presence_values = await asyncio.to_thread(redis_client.mget, presence_keys)
-        
-        # Map values back to IDs for easy lookup
-        # If value is None, the user is offline (key expired)
-        presence_map = {str(profiles[i]["_id"]): (val is not None) for i, val in enumerate(presence_values)}
-
-        # 5. Combine and return
-        return [{
-            "id": str(u["_id"]),
-            "username": u.get("username", "Unknown"),
-            "avatar": u.get("avatar_url", "/default-avatar.png"),
-            "is_online": presence_map.get(str(u["_id"]), False) # 🟢 The Green Dot logic
-        } for u in profiles]
+        friends = []
+        async for doc in cursor:
+            # Determine which ID is the friend's ID
+            friend_id = doc["recipient_id"] if doc["requester_id"] == user_id else doc["requester_id"]
+            
+            # Fetch Friend Details (Name, Avatar)
+            friend_data = await self.users.find_one({"_id": ObjectId(friend_id)})
+            if friend_data:
+                friends.append({
+                    "id": str(friend_data["_id"]),
+                    "username": friend_data.get("username", "Unknown"),
+                    "avatar": friend_data.get("avatar_url", "/default-avatar.png")
+                })
+        return friends
 
     async def get_pending_requests(self, user_id: str):
-        # ... logic as before (already optimized with $in) ...
+        # Incoming requests only
         cursor = self.collection.find({"recipient_id": user_id, "status": "pending"})
-        request_docs = await cursor.to_list(length=100)
-        if not request_docs: return []
+        requests = []
+        async for doc in cursor:
+            requester = await self.users.find_one({"_id": ObjectId(doc["requester_id"])})
+            if requester:
+                requests.append({
+                    "request_id": str(doc["_id"]),
+                    "username": requester.get("username"),
+                    "avatar": requester.get("avatar_url")
+                })
+        return requests
+    
+    async def search_users(self, query: str, current_user_id: str):
+        if not query:
+            return []
+            
+        # 1. Search for users (Case-insensitive, Partial Match)
+        # The "$ne" part ensures you don't find yourself in the list
+        cursor = self.users.find({
+            "username": {"$regex": query, "$options": "i"},
+            "_id": {"$ne": ObjectId(current_user_id)}
+        }).limit(5)  # Limit to 5 results to keep it fast
+        
+        results = []
+        async for user in cursor:
+            results.append({
+                "id": str(user["_id"]),
+                "username": user["username"],
+                "avatar": user.get("avatar_url", "/default-avatar.png")
+            })
+        return results
 
-        requester_ids = [ObjectId(doc["requester_id"]) for doc in request_docs]
-        profiles = await self.users.find({"_id": {"$in": requester_ids}}).to_list(length=100)
-        profile_map = {str(p["_id"]): p for p in profiles}
-
-        return [{
-            "request_id": str(doc["_id"]),
-            "username": profile_map[doc["requester_id"]].get("username"),
-            "avatar": profile_map[doc["requester_id"]].get("avatar_url", "/default-avatar.png")
-        } for doc in request_docs if doc["requester_id"] in profile_map]
+    # 🔥 NEW: Method to handle declining requests
+    async def decline_request(self, request_id: str, user_id: str):
+        """
+        Deletes a friend request if the user is the receiver.
+        """
+        result = await self.collection.delete_one({
+            "_id": ObjectId(request_id),
+            "recipient_id": user_id
+        })
+        return result.deleted_count > 0
