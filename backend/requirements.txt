@@ -19,6 +19,7 @@ python-multipart
 pydantic[email]
 pydantic-settings
 python-dotenv
+python-decouple  # 👈 THIS WAS MISSING AND CAUSED THE ERROR
 
 # Networking & Communications
 requests
