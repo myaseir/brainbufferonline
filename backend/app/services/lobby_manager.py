@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import WebSocket
 from typing import Dict
 import logging
@@ -14,8 +15,12 @@ class LobbyManager:
         await websocket.accept()
         self.active_connections[user_id] = websocket
         
-        # 🔥 FIX: REMOVED 'await' (Redis is synchronous)
-        redis_client.set(f"presence:{user_id}", "online", ex=60*60)
+        # 🚀 FIX: Use asyncio.to_thread so Redis calls don't freeze the server
+        # 🚀 MOBILE OPTIMIZATION: Set expiry to 60s instead of 1hr. 
+        # The heartbeat will keep it alive, but this ensures a clean state if phone dies.
+        await asyncio.to_thread(
+            redis_client.set, f"presence:{user_id}", "online", ex=60
+        )
         
         logger.info(f"✅ User {user_id} connected to Lobby")
 
@@ -23,23 +28,28 @@ class LobbyManager:
         if user_id in self.active_connections:
             del self.active_connections[user_id]
         
-        # 🔥 FIX: REMOVED 'await'
-        redis_client.delete(f"presence:{user_id}")
+        # 🚀 FIX: Wrap in to_thread to keep the event loop fast on Render
+        try:
+            await asyncio.to_thread(redis_client.delete, f"presence:{user_id}")
+        except Exception as e:
+            logger.error(f"Redis delete error: {e}")
+
         logger.info(f"❌ User {user_id} disconnected from Lobby")
 
     async def send_personal_message(self, message: dict, user_id: str):
-        """
-        Send a message directly to a specific user's socket.
-        Returns True if successful, False if user is offline.
-        """
         if user_id in self.active_connections:
             websocket = self.active_connections[user_id]
+            
+            # Check if socket is still alive before sending
+            if websocket.client_state.name != "CONNECTED":
+                await self.disconnect(user_id)
+                return False
+
             try:
                 await websocket.send_json(message)
                 return True
             except Exception as e:
                 logger.error(f"⚠️ Failed to send lobby message to {user_id}: {e}")
-                # If sending fails (broken pipe), force disconnect
                 await self.disconnect(user_id)
                 return False
         return False

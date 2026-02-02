@@ -20,7 +20,7 @@ async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
     async def heartbeat():
         try:
             while True:
-                await asyncio.sleep(25)
+                await asyncio.sleep(10)
                 # Check if the connection is still open before sending
                 if websocket.client_state.name == "CONNECTED":
                     await websocket.send_json({"type": "ping"})
