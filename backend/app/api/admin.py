@@ -252,3 +252,4 @@ async def get_peak_activity(admin: dict = Depends(get_current_admin)):
     except Exception as e:
         print(f"Stats Error: {e}")
         return []
+    

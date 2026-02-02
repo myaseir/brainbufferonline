@@ -48,13 +48,21 @@ app = FastAPI(
 
 # --- 🔒 CORS SETUP (Production Ready) ---
 origins = [
+    # 1. Local Development
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:3001",
     "http://127.0.0.1:3001",
+    
+    # 2. Production Websites
     "https://brainbufferonline.vercel.app", 
     "https://admin-brainbuffer.vercel.app",
-    "https://brainbufferonline.onrender.com"
+    "https://brainbufferonline.onrender.com",
+
+    # 3. 👇 CRITICAL FOR ANDROID APP (ADD THESE!)
+    "https://localhost",       # Android WebView
+    "capacitor://localhost",   # iOS/Android Capacitor
+    "http://localhost",        # Some Android versions
 ]
 
 app.add_middleware(
