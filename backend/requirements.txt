@@ -11,6 +11,7 @@ upstash-redis
 
 # Security & Authentication
 python-jose[cryptography]
+pyjwt  # 👈 THIS WAS MISSING
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-multipart
@@ -19,7 +20,7 @@ python-multipart
 pydantic[email]
 pydantic-settings
 python-dotenv
-python-decouple  # 👈 THIS WAS MISSING AND CAUSED THE ERROR
+python-decouple
 
 # Networking & Communications
 requests
