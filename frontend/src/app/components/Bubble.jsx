@@ -432,81 +432,78 @@ const scoreRef = useRef(0);
   };
   
 const handleClick = (num) => {
-    if (gameState !== 'playing' || isPaused || error) return;
-    if (processingClickRef.current.has(num)) return;
-    processingClickRef.current.add(num);
+  if (gameState !== 'playing' || isPaused || error) return;
+  if (processingClickRef.current.has(num)) return;
+  processingClickRef.current.add(num);
 
-    const sorted = [...numbers].sort((a, b) => a - b);
-    setClickedNumbers(prev => [...prev, num]);
+  const sorted = [...numbers].sort((a, b) => a - b);
+  setClickedNumbers(prev => [...prev, num]);
 
-    if (num === sorted[currentStepRef.current]) {
-      // --- ✅ CORRECT CLICK ---
-      currentStepRef.current += 1;
-      setCurrentStep(prev => prev + 1);
+  if (num === sorted[currentStepRef.current]) {
+    // --- ✅ CORRECT CLICK ---
+    currentStepRef.current += 1;
+    setCurrentStep(prev => prev + 1);
+    setCorrectNumbers(prev => [...prev, num]);
+    vibrate(50);
+    
+    if (settings.sfx) correctAudioRef.current?.cloneNode().play().catch(() => {});
 
-      setCorrectNumbers(prev => [...prev, num]);
-      vibrate(50);
-      if (settings.sfx) correctAudioRef.current?.cloneNode().play().catch(() => {});
+    // Update Score Logic
+    const pointsPerPop = 10;
+    const newScore = scoreRef.current + pointsPerPop;
+    scoreRef.current = newScore; 
+    setScore(newScore);
 
-      // 🔥 FIX: Use scoreRef for instant calculation
-      const pointsPerPop = 10;
-      const newScore = scoreRef.current + pointsPerPop; // Use Ref, not State
-      
-      scoreRef.current = newScore; // Update Ref Instantly
-      setScore(newScore);          // Update UI (Visual only)
-      
-      // Update High Score
-      if (newScore > highScore) {
-        localStorage.setItem('highScore', newScore);
-        setHighScore(newScore);
-      }
+    if (newScore > highScore) {
+      localStorage.setItem('highScore', newScore);
+      setHighScore(newScore);
+    }
 
-      // Send to Server
-      if (mode === 'online' && socket) {
-        socket.send(JSON.stringify({ type: 'SCORE_UPDATE', score: newScore }));
-      }
+    // --- 🚀 ROUND COMPLETION LOGIC ---
+    if (currentStepRef.current === sorted.length) {
+      clearAllTimers();
 
-      // --- ROUND COMPLETION ---
-      if (currentStepRef.current === sorted.length) {
-        clearAllTimers();
-        setRoundTimer(10);
+      // Check if it's the final round
+      if (round >= maxRound) {
+        if (mode === 'online' && socket) {
+          socket.send(JSON.stringify({ type: 'GAME_OVER', score: newScore }));
+        }
+        setWon(true);
+        handleGameOver();
+        if (settings.sfx) winAudioRef.current?.play();
+      } 
+      else {
+        // Not the final round: Send a single update for the completed round
+        if (mode === 'online' && socket) {
+          socket.send(JSON.stringify({ type: 'SCORE_UPDATE', score: newScore }));
+        }
         
+        // Show "Perfect" feedback
         if (!error) {
           setShowPerfectRound(true);
           setTimeout(() => setShowPerfectRound(false), 1200);
         }
 
-        if (round + 1 > maxRound) {
-          if (mode === 'offline') {
-            setWon(true);
-            handleGameOver();
-            if (settings.sfx) winAudioRef.current?.play();
-          } else {
-            socket.send(JSON.stringify({ type: 'GAME_OVER', score: newScore }));
-            handleGameOver();
-          }
-        } else {
-          setRound(r => r + 1);
-          setTimeout(() => startRound(round + 1), 1000);
-        }
+        // Proceed to next round
+        setRound(r => r + 1);
+        setTimeout(() => startRound(round + 1), 1000);
       }
-    } else {
-      // --- ❌ WRONG CLICK ---
-      clearAllTimers();
-      setError(true);
-      vibrate(200);
-      if (settings.sfx) wrongAudioRef.current?.play();
-
-      setTimeout(() => {
-        // Send current safe score (from Ref) if game over
-        if (mode === 'online' && socket) {
-          socket.send(JSON.stringify({ type: 'GAME_OVER', score: scoreRef.current }));
-        }
-        handleGameOver();
-        if (settings.sfx && !document.hidden) gameOverAudioRef.current?.play();
-      }, 600);
     }
-  };
+  } else {
+    // --- ❌ WRONG CLICK ---
+    clearAllTimers();
+    setError(true);
+    vibrate(200);
+    if (settings.sfx) wrongAudioRef.current?.play();
+
+    setTimeout(() => {
+      if (mode === 'online' && socket) {
+        socket.send(JSON.stringify({ type: 'GAME_OVER', score: scoreRef.current }));
+      }
+      handleGameOver();
+    }, 600);
+  }
+};
 
   return (
     <div className="relative h-screen w-full bg-[#fcfdfd] overflow-hidden select-none font-sans text-slate-800">
