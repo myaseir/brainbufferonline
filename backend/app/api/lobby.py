@@ -9,7 +9,7 @@ import logging
 logger = logging.getLogger("uvicorn.error")
 router = APIRouter()
 
-# 🚀 NEW: HTTP endpoint for presence polling (mobile fallback)
+# 🚀 UPDATED: HTTP endpoint for presence polling (mobile fallback)
 @router.get("/presence/online")
 async def get_online_users():
     """
@@ -23,7 +23,7 @@ async def get_online_users():
         logger.error(f"Error fetching online users: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch online users")
 
-# 🚀 NEW: Health check endpoint to keep Render app awake
+# 🚀 UPDATED: Health check endpoint to keep Render app awake
 @router.get("/health")
 async def health_check():
     """
@@ -31,6 +31,46 @@ async def health_check():
     to prevent Render free tier from sleeping the app.
     """
     return {"status": "ok"}
+
+# 🚀 NEW: HTTP endpoint for sending challenges (mobile fallback)
+@router.post("/lobby/challenge")
+async def send_challenge(token: str = Query(...), target_id: str = Query(...), username: str = Query("Unknown")):
+    """
+    HTTP fallback for sending challenges. Use this on mobile if WebSocket fails.
+    """
+    user_id = await get_user_from_token(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    # Check if target is online
+    online_users = await lobby_manager.get_online_users()
+    if target_id not in online_users:
+        raise HTTPException(status_code=400, detail="User is offline")
+    
+    sent = await lobby_manager.send_personal_message({
+        "type": "INCOMING_CHALLENGE",
+        "challenger_id": user_id,
+        "challenger_name": username,
+        "bet_amount": 50
+    }, target_id)
+    
+    if not sent:
+        raise HTTPException(status_code=500, detail="Failed to send challenge")
+    
+    return {"message": "Challenge sent"}
+
+# 🚀 NEW: HTTP endpoint for force logout (clear presence on app close)
+@router.post("/lobby/logout")
+async def force_logout(token: str = Query(...)):
+    """
+    Force logout to clear presence. Call this on app close or manual logout.
+    """
+    user_id = await get_user_from_token(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    await lobby_manager.force_logout(user_id)
+    return {"message": "Logged out"}
 
 @router.websocket("/ws/lobby")
 async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
@@ -49,7 +89,7 @@ async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
                 # Check if the connection is still open before sending
                 if websocket.client_state.name == "CONNECTED":
                     await websocket.send_json({"type": "ping"})
-                    # 🚀 NEW: Refresh presence to prevent expiry
+                    # 🚀 UPDATED: Refresh presence only if still online
                     await lobby_manager.refresh_presence(user_id)
         except asyncio.CancelledError:
             pass
@@ -70,6 +110,12 @@ async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
                 target_id = data['target_id']
                 challenger_name = data.get('username', 'Unknown')
                 
+                # 🚀 UPDATED: Check online status before sending
+                online_users = await lobby_manager.get_online_users()
+                if target_id not in online_users:
+                    await websocket.send_json({"type": "ERROR", "message": "User is offline"})
+                    continue
+                
                 sent = await lobby_manager.send_personal_message({
                     "type": "INCOMING_CHALLENGE",
                     "challenger_id": user_id,
@@ -78,7 +124,7 @@ async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
                 }, target_id)
                 
                 if not sent:
-                    await websocket.send_json({"type": "ERROR", "message": "User is offline"})
+                    await websocket.send_json({"type": "ERROR", "message": "Failed to send challenge"})
 
             elif msg_type == 'ACCEPT_CHALLENGE':
                 challenger_id = data['challenger_id']
@@ -110,7 +156,6 @@ async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
         logger.error(f"Lobby Error for {user_id}: {e}")
     finally:
         heartbeat_task.cancel()
-        # Ensure we wait for the task to actually stop
         try:
             await heartbeat_task
         except asyncio.CancelledError:
