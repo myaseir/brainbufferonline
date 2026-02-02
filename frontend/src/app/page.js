@@ -4,14 +4,15 @@ import Auth from './components/Auth';
 import Dashboard from './components/Dashboard/page';
 import BubbleGame from './components/Bubble'; 
 import { Toaster } from 'react-hot-toast';
+
 export default function Home() {
   const [view, setView] = useState('loading');
   const [user, setUser] = useState(null);
   const [matchSocket, setMatchSocket] = useState(null);
   const [gameMode, setGameMode] = useState('offline');
-  const [isConnecting, setIsConnecting] = useState(false);
   
-  const matchmakingSocketRef = useRef(null);
+  // We no longer need isConnecting or matchmakingSocketRef here
+  // because DashboardPage handles the search via HTTP API.
 
   const fetchUserData = async () => {
     const token = localStorage.getItem('token');
@@ -42,92 +43,25 @@ export default function Home() {
 
   useEffect(() => { fetchUserData(); }, []);
 
-  // --- 🚀 NEW: DIRECT CHALLENGE JOINER ---
-  // This function skips matchmaking and connects directly to a specific Match ID
-  const joinChallengeMatch = (matchId) => {
+  // --- 🎮 UNIFIED GAME CONNECTOR ---
+  // This function is called by Dashboard when:
+  // 1. A Ranked Match is found (via API)
+  // 2. A Challenge is accepted
+  const connectToGame = (matchId) => {
     const token = localStorage.getItem('token');
     if (!token) return;
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
-    const WS_URL = API_URL.replace(/^http/, 'ws'); 
+    // Ensure we use wss:// in production
+    const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const WS_BASE = API_URL.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
 
     // Connect directly to the Game Room
-    const gameSocket = new WebSocket(`${WS_URL}/api/game/ws/match/${matchId}?token=${token}`);
+    const gameSocket = new WebSocket(`${WS_BASE}/api/game/ws/match/${matchId}?token=${token}`);
     
     setMatchSocket(gameSocket);
-    setGameMode('online'); // Challenges are always online
-    setView('playing');    // Switch view immediately
-  };
-
-  // --- 🔍 MATCHMAKING LOGIC ---
-  const startOnlineMatch = () => {
-    const token = localStorage.getItem('token');
-    if (!token || isConnecting) return;
-
-    setIsConnecting(true);
-    setView('searching');
-    
-    if (matchmakingSocketRef.current) {
-        matchmakingSocketRef.current.onmessage = null; 
-        matchmakingSocketRef.current.close();
-    }
-
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
-    const WS_URL = API_URL.replace(/^http/, 'ws'); 
-
-    setTimeout(() => {
-      try {
-        const mmWs = new WebSocket(`${WS_URL}/api/game/ws/matchmaking?token=${token}`);
-        matchmakingSocketRef.current = mmWs;
-
-        mmWs.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-          
-          if (data.type === "MATCH_FOUND") {
-            const gameSocket = new WebSocket(`${WS_URL}/api/game/ws/match/${data.match_id}?token=${token}`);
-            setMatchSocket(gameSocket);
-            setGameMode('online');
-            setView('playing');
-            setIsConnecting(false);
-            mmWs.onmessage = null;
-            mmWs.close();
-          }
-
-          if (data.type === "ERROR") {
-            console.error("Matchmaking Error:", data.message);
-            if (data.message === "Insufficient Balance") {
-                alert("⚠️ Insufficient Funds! You need at least 50 PKR to play.");
-            }
-            setIsConnecting(false);
-            setView('dashboard');
-            mmWs.close();
-          }
-        };
-
-        mmWs.onerror = (err) => {
-          console.error("WebSocket Connection Failed. Resetting...");
-          setIsConnecting(false);
-          setView('dashboard');
-        };
-
-        mmWs.onclose = () => setIsConnecting(false);
-
-      } catch (err) {
-        setIsConnecting(false);
-        setView('dashboard');
-      }
-    }, 800); 
-  };
-
-  const cancelSearch = () => {
-    if (matchmakingSocketRef.current) {
-      matchmakingSocketRef.current.onmessage = null; 
-      matchmakingSocketRef.current.onerror = null; 
-      matchmakingSocketRef.current.close();
-      matchmakingSocketRef.current = null;
-    }
-    setIsConnecting(false);
-    setView('dashboard');
+    setGameMode('online');
+    setView('playing'); // Switch view immediately
   };
 
   return (
@@ -135,10 +69,9 @@ export default function Home() {
       <Toaster 
         position="top-center" 
         reverseOrder={false}
-        containerStyle={{
-           zIndex: 99999 // This forces it to be ON TOP of the sidebar
-        }}
+        containerStyle={{ zIndex: 99999 }}
       />
+      
       {view === 'loading' && (
         <div className="flex items-center justify-center h-screen">
           <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
@@ -155,39 +88,44 @@ export default function Home() {
       {view === 'dashboard' && (
         <Dashboard 
           user={user} 
-          onStartGame={startOnlineMatch} 
-          onStartOffline={() => { setGameMode('offline'); setMatchSocket(null); setView('playing'); }} 
-          onLogout={() => { localStorage.clear(); setUser(null); setView('auth'); }} 
+          // 1. Offline Mode
+          onStartOffline={() => { 
+            setGameMode('offline'); 
+            setMatchSocket(null); 
+            setView('playing'); 
+          }} 
           
-          // ✅ PASS THIS PROP DOWN
-          onJoinChallenge={joinChallengeMatch} 
+          // 2. Logout
+          onLogout={() => { 
+            localStorage.clear(); 
+            setUser(null); 
+            setView('auth'); 
+          }} 
+          
+          // 3. ✅ NEW: Unified Handler for Ranked & Challenges
+          onJoinChallenge={connectToGame} 
+          onMatchFound={connectToGame} 
         />
       )}
 
-      {view === 'searching' && (
-        <div className="flex flex-col items-center justify-center h-screen bg-[#fcfdfd]">
-          <div className="w-16 h-16 border-4 border-slate-100 border-t-emerald-500 rounded-full animate-spin mb-10"></div>
-          <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">Matchmaking</h2>
-          <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-2 animate-pulse">Scanning for Opponents...</p>
-          <button onClick={cancelSearch} className="mt-16 px-10 py-4 bg-white text-slate-400 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg border border-slate-100 active:scale-95 transition-all">
-            Cancel Search
-          </button>
-        </div>
-      )}
+      {/* Note: 'searching' view is removed because Dashboard handles that UI now */}
 
       {view === 'playing' && (
         <BubbleGame 
           mode={gameMode} 
           socket={matchSocket} 
+          // Restart: In online mode, we usually go back to dashboard to queue again
           onRestart={() => { 
             if(matchSocket) matchSocket.close(); 
-            setMatchSocket(null); 
-            setTimeout(() => startOnlineMatch(), 1000); 
+            setMatchSocket(null);
+            fetchUserData(); // Refresh money
+            setView('dashboard');
           }}
           onQuit={() => { 
             if(matchSocket) matchSocket.close(); 
             setMatchSocket(null); 
             fetchUserData(); 
+            setView('dashboard');
           }} 
         />
       )}

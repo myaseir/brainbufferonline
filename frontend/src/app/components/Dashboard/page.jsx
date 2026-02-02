@@ -1,12 +1,14 @@
 "use client";
 import { useState, useEffect } from 'react';
 import Navbar from './Navbar';
+import { toast } from 'react-hot-toast';
 import Leaderboard from './Leaderboard';
 import RecentMatches from './RecentMatches';
 import FriendSidebar from './FriendSidebar';
 import LobbyListener from '../LobbyListener';
+import SupportModal from './SupportModal';
 
-import { Target, Play, Zap, Crown, Trophy, X, DollarSign, UserCheck, Smartphone, Hash, Banknote, CheckCircle2, Wallet, Lock } from 'lucide-react';
+import { Target, Play, Zap, Crown, Trophy, X, DollarSign, UserCheck, Smartphone, Hash, Banknote, CheckCircle2, Wallet, Lock, Loader2, LifeBuoy } from 'lucide-react';
 
 export default function DashboardPage({ user, onStartGame, onStartOffline, onLogout, onJoinChallenge }) {
   const [stats, setStats] = useState({ top_players: [], global_stats: { total_pool: 0 } });
@@ -27,6 +29,8 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
   const [depositData, setDepositData] = useState({ amount: "", fullName: "", senderNumber: "", trxId: "" });
   const [withdrawData, setWithdrawData] = useState({ amount: "", method: "Easypaisa", accountNumber: "", accountName: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSupport, setShowSupport] = useState(false);
 
   // User State
   const [localUser, setLocalUser] = useState(user);
@@ -70,6 +74,54 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
         setLocalUser(data);
       }
     } catch (err) { console.error(err); }
+  };
+
+  const handleRankedSearch = async () => {
+    if (!canPlayRanked) return;
+    
+    setIsSearching(true);
+    const token = localStorage.getItem('token');
+
+    try {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/matchmaking/find`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+            // 🚨 CATCH THE REFUND ERROR HERE 🚨
+            if (res.status === 500 && data.detail && data.detail.includes("refunded")) {
+                toast.error("Matchmaking failed. Your funds have been refunded.", {
+                    duration: 5000,
+                    icon: '💸',
+                    style: { background: '#fff', color: '#333' }
+                });
+                refreshUser(); // Refresh wallet to show money is back
+            } else if (res.status === 400 && data.detail === "Insufficient funds") {
+                toast.error("Insufficient funds! Please deposit.", { icon: '💰' });
+            } else {
+                toast.error(data.detail || "Failed to join queue");
+            }
+            setIsSearching(false);
+            return;
+        }
+
+        if (data.status === "WAITING") {
+             toast("Searching for opponent...", { icon: '🔍' });
+        } else {
+             refreshUser();
+        }
+
+    } catch (error) {
+        console.error("Matchmaking error:", error);
+        toast.error("Connection error. Please try again.");
+        setIsSearching(false);
+    }
   };
 
   const handleDeposit = async (e) => {
@@ -193,8 +245,8 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
               </div>
               
               <button 
-                onClick={onStartGame} 
-                disabled={!canPlayRanked}
+                onClick={handleRankedSearch} 
+                disabled={!canPlayRanked || isSearching}
                 className={`w-full group relative overflow-hidden p-6 rounded-3xl transition-all shadow-lg 
                   ${canPlayRanked 
                     ? "bg-gradient-to-r from-green-400 to-emerald-400 hover:scale-[1.02] active:scale-95 shadow-emerald-200" 
@@ -203,14 +255,17 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
                 `}
               >
                 <div className="relative z-10 flex flex-col items-center gap-3">
-                  {canPlayRanked ? (
+                  {isSearching ? (
+                     <Loader2 className="animate-spin text-white" size={32} />
+                  ) : canPlayRanked ? (
                     <Play className="fill-white text-white translate-x-1" size={32} />
                   ) : (
                     <Lock className="text-slate-400" size={32} />
                   )}
+                  
                   <div className="text-center">
                     <span className={`block text-xl font-black uppercase tracking-tighter ${canPlayRanked ? "text-white" : "text-slate-400"}`}>
-                        {canPlayRanked ? "Ranked Match" : "Insufficient Funds"}
+                        {isSearching ? "Searching..." : (canPlayRanked ? "Ranked Match" : "Insufficient Funds")}
                     </span>
                     <span className={`text-[10px] font-bold uppercase tracking-widest ${canPlayRanked ? "text-white opacity-90" : "text-slate-400"}`}>
                         {canPlayRanked ? "Win 90 PKR • Entry 50 PKR" : "Deposit required to play"}
@@ -312,6 +367,20 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
           </div>
         </div>
       )}
+
+      {/* --- SUPPORT MODAL & BUTTON (Added Here) --- */}
+      <SupportModal isOpen={showSupport} onClose={() => setShowSupport(false)} />
+      
+      <button 
+        onClick={() => setShowSupport(true)}
+        className="fixed bottom-6 right-6 bg-slate-900 text-white p-4 rounded-full shadow-2xl hover:scale-110 active:scale-95 transition-all z-[90] group"
+      >
+        <LifeBuoy size={24} className="group-hover:animate-spin" />
+        <span className="absolute right-full mr-4 top-1/2 -translate-y-1/2 bg-slate-900 text-white text-xs font-bold py-1 px-3 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+          Help Center
+        </span>
+      </button>
+
     </div>
   );
 }

@@ -7,7 +7,7 @@ from app.api import auth, wallet, game_ws, leaderboard, admin, friends, lobby
 from app.core.config import settings
 import logging
 import os
-
+from app.api import support
 # --- 📝 LOGGING SETUP ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("uvicorn.error")
@@ -75,7 +75,7 @@ app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 # ✅ NEW ROUTERS ADDED HERE
 app.include_router(friends.router, prefix="/api/friends", tags=["Friends"])
 app.include_router(lobby.router, tags=["Lobby"]) # Handles /ws/lobby
-
+app.include_router(support.router, prefix="/api/support", tags=["Support"])
 @app.get("/")
 def read_root():
     return {

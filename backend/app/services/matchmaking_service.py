@@ -44,17 +44,31 @@ class MatchmakingService:
                 await self.user_repo.update_wallet(user_id, -50.0)
                 
                 match_id = f"match_{uuid.uuid4().hex[:8]}"
-                await self.match_repo.create_match_record(match_id, opponent_id, user_id, 50.0)
-                
-                # Notify the opponent who was already waiting
-                redis_client.set(f"notify:{opponent_id}", match_id, ex=30)
-                
-                return {
-                    "status": "MATCHED",
-                    "match_id": match_id,
-                    "opponent_id": opponent_id,
-                    "entry_fee": 50.0
-                }
+
+                # 🚨 SAFETY UPDATE: Wrap DB creation in try/except 
+                try:
+                    await self.match_repo.create_match_record(match_id, opponent_id, user_id, 50.0)
+                    
+                    # Notify the opponent who was already waiting
+                    redis_client.set(f"notify:{opponent_id}", match_id, ex=30)
+                    
+                    return {
+                        "status": "MATCHED",
+                        "match_id": match_id,
+                        "opponent_id": opponent_id,
+                        "entry_fee": 50.0
+                    }
+
+                except Exception as db_error:
+                    logger.error(f"❌ Failed to create match in DB: {db_error}")
+                    
+                    # 1. Refund the current user immediately
+                    await self.user_repo.update_wallet(user_id, 50.0)
+                    
+                    # 2. Put the opponent back in the pool (so they don't lose their spot/money)
+                    redis_client.sadd("matchmaking_pool", opponent_id)
+                    
+                    raise HTTPException(status_code=500, detail="Match creation failed. Funds refunded.")
 
             else:
                 # --- ⏳ JOIN THE POOL ---
@@ -71,11 +85,10 @@ class MatchmakingService:
 
                 return {"status": "WAITING", "user_id": user_id}
 
+        except HTTPException as he:
+            raise he
         except Exception as e:
             logger.error(f"Matchmaking Error: {str(e)}")
-            # If we reach here and it's a Redis 'WRONGPASS' error, 
-            # the HTTPException will prevent the money from being lost 
-            # IF the error happened before update_wallet.
             raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
 
     async def check_notif(self, user_id: str):
@@ -109,7 +122,4 @@ class MatchmakingService:
 
         except Exception as e:
             logger.error(f"Cancel Matchmaking Redis Error: {e}")
-            # If Redis is down (WRONGPASS), we can't verify if they are in the pool.
-            # To be safe, we don't refund blindly to avoid infinite money glitches,
-            # but we tell the user there is a connection issue.
             raise HTTPException(status_code=500, detail="Service unavailable. Could not verify refund.")
