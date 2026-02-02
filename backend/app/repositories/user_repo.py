@@ -70,6 +70,7 @@ class UserRepository:
             redis_client.zadd("leaderboard:wins", {u_id_str: total_wins})
             redis_client.hset(f"user:profile:{u_id_str}", "username", user["username"])
             redis_client.expire(f"user:profile:{u_id_str}", 3600)
+            redis_client.delete("cache:leaderboard_full")
         
         return user
 
