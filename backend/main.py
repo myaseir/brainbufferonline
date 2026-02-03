@@ -12,6 +12,7 @@ from app.api import support
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("uvicorn.error")
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- 🚀 STARTUP LOGIC ---
@@ -92,3 +93,8 @@ def read_root():
         "version": settings.VERSION, 
         "environment": "Production" if os.getenv("RENDER") else "Local Development"
     }
+    
+@app.get("/api/public/ping")
+async def public_ping():
+    return {"status": "online", "nodes": "Glacia Connection Active"}
+
