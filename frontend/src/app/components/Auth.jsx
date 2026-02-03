@@ -246,10 +246,10 @@ export default function Auth({ onLoginSuccess }) {
         {/* Scroll Hint */}
         <div 
           onClick={() => scrollToSection('download')}
-          className="absolute bottom-4 md:bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 md:gap-2 cursor-pointer z-20 group"
+          className="absolute bottom-4 md:bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap- md:gap-2 cursor-pointer z-20 group"
         >
            <span className="text-[8px] md:text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 group-hover:text-green-500 transition-colors">Legal & App</span>
-           <ChevronDown className="animate-bounce text-green-500" size={20} />
+           <ChevronDown className="animate-bounce text-green-500" size={30} />
         </div>
       </section>
 
@@ -285,18 +285,26 @@ export default function Auth({ onLoginSuccess }) {
               ))}
             </div>
 
-            <div className="mt-10 flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4">
-              <a 
-                href="/BrainBuffer.apk" 
-                download="BrainBuffer.apk"
-                className="w-full sm:w-auto text-center bg-slate-900 text-white px-10 py-5 rounded-xl md:rounded-2xl font-black uppercase tracking-widest text-[10px] md:text-[11px] hover:bg-green-600 transition-all shadow-xl active:scale-95"
-              >
-                Download BrainBuffer v1.0
-              </a>
-              <p className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                Size: 14MB • Android 6.0+
-              </p>
-            </div>
+            <div className="mt-10 flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-6">
+  <a 
+    href="/BrainBuffer.apk" 
+    download="BrainBuffer.apk"
+    /* Changed w-full to w-fit and added md:px-12 for a more substantial look on laptop */
+    className="w-fit min-w-[240px] text-center bg-slate-900 text-white px-8 md:px-12 py-5 rounded-2xl font-black uppercase tracking-widest text-[10px] md:text-[11px] hover:bg-green-600 transition-all shadow-2xl active:scale-95 flex items-center justify-center gap-3"
+  >
+    <Smartphone size={16} className="text-green-400" />
+    Download BrainBuffer v1.0
+  </a>
+  
+  <div className="flex flex-col items-center lg:items-start">
+    <p className="text-[9px] md:text-[10px] text-slate-400 font-black uppercase tracking-[0.2em]">
+      Current Build: <span className="text-slate-900">v1.0.0-Stable</span>
+    </p>
+    <p className="text-[9px] md:text-[10px] text-slate-300 font-bold uppercase tracking-widest">
+      Size: 14MB • Android 6.0+
+    </p>
+  </div>
+</div>
           </div>
 
           {/* Centered Phone Preview for Mobile */}
@@ -338,7 +346,7 @@ export default function Auth({ onLoginSuccess }) {
           
           <div className="space-y-4 md:space-y-6 text-center md:text-left">
             <div className="flex items-center justify-center md:justify-start gap-3 text-green-400">
-               <Scale size={24} />
+               <Scale size={25} />
                <h3 className="text-base md:text-lg font-black uppercase tracking-widest">Legal Standing</h3>
             </div>
             <p className="text-slate-400 text-xs md:text-sm leading-relaxed font-medium">
