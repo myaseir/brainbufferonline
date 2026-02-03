@@ -1,8 +1,31 @@
 "use client";
-import { User, PlusCircle, ArrowUpRight, LogOut, Users } from 'lucide-react';
+import { useEffect } from 'react';
+import { User, PlusCircle, ArrowUpRight, LogOut, Users, Wifi } from 'lucide-react';
+import { useNetworkCheck } from '../../hooks/useNetworkCheck'; // 🔌 Import Hook
 
-// 1. Added 'requestCount' to props
 export default function Navbar({ user, onDeposit, onWithdraw, onLogout, onOpenFriends, requestCount }) {
+  // 1. Get Network Latency
+  const { checkPing, latency } = useNetworkCheck();
+
+  // 2. Check ping when Navbar mounts
+  useEffect(() => {
+    checkPing(); // Check immediately on load
+
+    const interval = setInterval(() => {
+        checkPing(); 
+    }, 1000); // <--- 10,000ms = 10 Seconds
+
+    return () => clearInterval(interval); // Cleanup when user leaves
+  }, [checkPing]);
+
+  // 3. Color Logic
+  const getPingColor = () => {
+    if (!latency) return "text-slate-400";
+    if (latency < 150) return "text-emerald-500"; // Good
+    if (latency < 300) return "text-amber-500";   // Okay
+    return "text-red-500";                        // Bad
+  };
+
   return (
     <header className="flex flex-col md:flex-row justify-between items-center gap-4 md:gap-6 bg-white/80 backdrop-blur-xl border border-white p-4 md:p-6 rounded-3xl shadow-lg shadow-green-900/5 overflow-hidden">
       
@@ -18,8 +41,18 @@ export default function Navbar({ user, onDeposit, onWithdraw, onLogout, onOpenFr
           <h1 className="text-xl md:text-2xl font-black tracking-tight text-slate-900 uppercase truncate">
             {user?.username || 'Commander'}
           </h1>
+          
           <div className="flex items-center gap-2 mt-1">
             <span className="bg-green-50 text-green-600 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border border-green-100 shrink-0">Rank: Elite</span>
+            
+            {/* 📡 NEW: Live Wifi Ping Indicator */}
+            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-50 border border-slate-100 ${getPingColor()}`}>
+               <Wifi size={10} strokeWidth={3} />
+               <span className="text-[10px] font-bold uppercase tracking-wider">
+                 {latency ? `${latency}ms` : '...'}
+               </span>
+            </div>
+
             <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest truncate hidden md:block">• PK Server</span>
           </div>
         </div>
@@ -53,15 +86,13 @@ export default function Navbar({ user, onDeposit, onWithdraw, onLogout, onOpenFr
             <ArrowUpRight size={14}/> Withdraw
           </button>
 
-          {/* 🔥 NEW: Friends Button with Notification Badge */}
+          {/* Friends Button */}
           <button 
             onClick={onOpenFriends} 
             className="p-3 bg-slate-50 hover:bg-emerald-50 hover:text-emerald-500 border border-slate-100 rounded-xl transition-all shadow-sm flex items-center justify-center shrink-0 group relative"
             title="Friends"
           >
             <Users size={20} />
-            
-            {/* 🔴 THE RED BADGE */}
             {requestCount > 0 && (
               <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-black flex items-center justify-center rounded-full border-2 border-white animate-bounce shadow-sm">
                 {requestCount}

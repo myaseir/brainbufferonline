@@ -113,10 +113,30 @@ async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
                 await lobby_manager.send_personal_message(start_msg, challenger_id)
 
     except WebSocketDisconnect:
+        # 🟢 Normal Closure: User closed the tab or app. No error logging needed.
         pass 
+    
     except Exception as e:
-        print(f"Lobby Error for {user_id}: {e}")
+        # 🔴 Unexpected Error: Log this for debugging (e.g., Sentry or CloudWatch)
+        print(f"⚠️ Critical Lobby Error for User {user_id}: {e}")
+    
     finally:
-        # 🚀 5. CLEANUP: Cancel heartbeat and disconnect presence
-        heartbeat_task.cancel()
+        # 🚀 5. PROFESSIONAL CLEANUP ROUTINE
+        # This block ALWAYS runs, even if the server crashes or user disconnects.
+        
+        # A. Stop the Heartbeat Task
+        # Prevents "Task was destroyed but it is pending" warnings in logs
+        if not heartbeat_task.done():
+            heartbeat_task.cancel()
+
+        # B. Remove from Lobby Memory
+        # Immediately stops anyone else from trying to send challenges to this dead socket
         await lobby_manager.disconnect(user_id)
+
+        # C. Broadcast "Offline" Status
+        # 🛡️ Fairness: Instantly tells friends "I am gone" so they don't waste time challenging me.
+        try:
+            await lobby_manager.broadcast_user_status(user_id, "offline")
+        except Exception as broadcast_error:
+            # If Redis/DB fails, just log it. Don't let it crash the whole cleanup.
+            print(f"Failed to broadcast offline status for {user_id}: {broadcast_error}")

@@ -2,9 +2,12 @@ from app.db.mongodb import db
 from app.db.redis import redis_client
 from bson import ObjectId
 from datetime import datetime, timezone
+import logging
+
+logger = logging.getLogger("uvicorn.error")
 
 class UserRepository:
-    def __init__(self):  # Fixed: Double underscores and proper indentation
+    def __init__(self):
         pass
 
     @property
@@ -13,6 +16,12 @@ class UserRepository:
             raise ConnectionError("MongoDB Database not initialized.")
         return db.db.users
 
+    @property
+    def matches_collection(self):
+        return db.db.matches 
+
+    # --- 🛠️ CORE AUTH METHODS (RESTORED) ---
+
     async def get_by_id(self, user_id: str):
         try:
             return await self.collection.find_one({"_id": ObjectId(str(user_id))})
@@ -20,6 +29,7 @@ class UserRepository:
             return None
 
     async def get_by_email(self, email: str):
+        """Used by AuthService for login validation."""
         return await self.collection.find_one({"email": email})
 
     async def get_by_username(self, username: str):
@@ -31,29 +41,27 @@ class UserRepository:
         result = await self.collection.insert_one(user_data)
         return str(result.inserted_id)
 
-    async def update_wallet(self, user_id: str, amount: float):
-        """
-        Updates wallet balance. 
-        SAFEGUARD: If amount is negative (deduction), it ONLY executes 
-        if the user has enough balance.
-        """
+    # --- 💰 WALLET & STATS METHODS ---
+
+    async def update_wallet(self, user_id: str, amount: float, session=None):
+        """Atomic wallet update with optional transaction support."""
         query = {"_id": ObjectId(str(user_id))}
         
-        # 🛡️ ATOMIC CHECK: Prevent negative balance
+        # 🛡️ Safeguard: Prevent negative balance if deducting
         if amount < 0:
             query["wallet_balance"] = {"$gte": abs(amount)}
 
         result = await self.collection.update_one(
             query,
-            {"$inc": {"wallet_balance": amount}}
+            {"$inc": {"wallet_balance": amount}},
+            session=session
         )
         
+        # Clear stats cache if wallet changes
         redis_client.delete("stats:total_pool")
-        
-        # Returns True if transaction succeeded, False if insufficient funds
         return result.modified_count > 0
 
-    async def record_match_stats(self, user_id: str, is_win: bool):
+    async def record_match_stats(self, user_id: str, is_win: bool, session=None):
         u_id_str = str(user_id)
         update_query = {"$inc": {"total_matches": 1}}
         if is_win:
@@ -62,118 +70,99 @@ class UserRepository:
         user = await self.collection.find_one_and_update(
             {"_id": ObjectId(u_id_str)},
             update_query,
+            session=session,
             return_document=True
         )
 
         if user:
+            # Sync to Redis Leaderboard
             total_wins = user.get("total_wins", 0)
             redis_client.zadd("leaderboard:wins", {u_id_str: total_wins})
-            redis_client.hset(f"user:profile:{u_id_str}", "username", user["username"])
-            redis_client.expire(f"user:profile:{u_id_str}", 3600)
             redis_client.delete("cache:leaderboard_full")
         
         return user
 
-    async def add_match_to_history(self, user_id: str, match_summary: dict):
-        if isinstance(match_summary.get("timestamp"), datetime):
-            match_summary["timestamp"] = match_summary["timestamp"].isoformat()
-        
-        if "timestamp" not in match_summary:
-            match_summary["timestamp"] = datetime.now(timezone.utc).isoformat()
+    # --- 🚀 MATCH FINALIZATION & PAYOUT ---
 
-        return await self.collection.update_one(
-            {"_id": ObjectId(str(user_id))},
-            {
-                "$push": {
-                    "recent_matches": {
-                        "$each": [match_summary],
-                        "$position": 0,
-                        "$slice": 20 
-                    }
-                }
-            },
-            upsert=True 
-        )
-    
-    async def save_match_result(
+    async def process_match_payout(
         self, 
         match_id: str, 
-        user_id: str, 
-        opponent_id: str, 
-        result: str, 
-        my_score: int, 
-        op_score: int
+        winner_id: str, 
+        player1_id: str, 
+        player2_id: str, 
+        p1_score: int, 
+        p2_score: int,
+        is_draw: bool = False
     ):
         """
-        Finalizes the match in MongoDB.
-        'result' is relative to user_id (WON, LOST, DRAW, OPPONENT_FLED)
+        🚀 Uses a MongoDB transaction to ensure money is handled safely.
         """
         try:
-            # 🚀 DEBUG: Log that the method is called
-            print(f"DEBUG: save_match_result called for match {match_id}, user {user_id}, result {result}")
+            # 1. Check if match is already finalized
+            match_doc = await self.matches_collection.find_one({"match_id": match_id})
+            if not match_doc or match_doc.get("status") == "completed":
+                logger.warning(f"Match {match_id} already finalized or missing.")
+                return False
 
-            # 1. Determine local results for both players
-            is_draw = result == "DRAW"
-            
-            # Winner logic
-            winner_id = None
-            loser_id = None
-            
-            if result in ["WON", "OPPONENT_FLED"]:
-                winner_id = user_id
-                loser_id = opponent_id
-            elif result == "LOST":
-                winner_id = opponent_id
-                loser_id = user_id
+            # 2. Start Atomic Transaction
+            async with await db.client.start_session() as session:
+                async with session.start_transaction():
+                    
+                    # A. Lock the match record
+                    await self.matches_collection.update_one(
+                        {"match_id": match_id},
+                        {"$set": {
+                            "status": "completed",
+                            "winner_id": ObjectId(winner_id) if winner_id else None,
+                            "final_scores": {player1_id: p1_score, player2_id: p2_score},
+                            "finished_at": datetime.now(timezone.utc)
+                        }},
+                        session=session
+                    )
 
-            # 2. Update Wallets & Stats
-            if is_draw:
-                # Both get 50.0 back
-                await self.update_wallet(user_id, 50.0)
-                await self.update_wallet(opponent_id, 50.0)
-                print(f"DEBUG: Draw - Refunded {user_id} and {opponent_id}")
-                # Increment match count for both
-                await self.record_match_stats(user_id, is_win=False)
-                await self.record_match_stats(opponent_id, is_win=False)
-            else:
-                # Winner gets 90.0
-                await self.update_wallet(winner_id, 90.0)
-                print(f"DEBUG: Win - Paid {winner_id} +90")
-                # Record stats (is_win=True for winner, False for loser)
-                await self.record_match_stats(winner_id, is_win=True)
-                await self.record_match_stats(loser_id, is_win=False)
+                    # B. Payouts
+                    if is_draw:
+                        await self.update_wallet(player1_id, 50.0, session=session)
+                        await self.update_wallet(player2_id, 50.0, session=session)
+                    else:
+                        await self.update_wallet(winner_id, 90.0, session=session)
 
-            # 3. Add to Match History (Recent Matches)
-            # Get usernames for the history record
-            u1 = await self.get_by_id(user_id)
-            u2 = await self.get_by_id(opponent_id)
-            
-            name1 = u1.get("username", "Unknown") if u1 else "Unknown"
-            name2 = u2.get("username", "Unknown") if u2 else "Unknown"
+                    # C. Update Stats
+                    await self.record_match_stats(player1_id, is_win=(winner_id == player1_id), session=session)
+                    await self.record_match_stats(player2_id, is_win=(winner_id == player2_id), session=session)
 
-            timestamp = datetime.now(timezone.utc).isoformat()
+                    # D. Add to History
+                    await self._quick_history_add(player1_id, match_id, player2_id, p1_score, p2_score, winner_id, session)
+                    await self._quick_history_add(player2_id, match_id, player1_id, p2_score, p1_score, winner_id, session)
 
-            # Record for User 1
-            await self.add_match_to_history(user_id, {
-                "match_id": match_id,
-                "opponent_name": name2,
-                "result": "WON" if winner_id == user_id else ("DRAW" if is_draw else "LOST"),
-                "score": f"{my_score} - {op_score}",
-                "timestamp": timestamp
-            })
-
-            # Record for User 2 (Opponent)
-            await self.add_match_to_history(opponent_id, {
-                "match_id": match_id,
-                "opponent_name": name1,
-                "result": "WON" if winner_id == opponent_id else ("DRAW" if is_draw else "LOST"),
-                "score": f"{op_score} - {my_score}",
-                "timestamp": timestamp
-            })
-
-            print(f"DEBUG: Match result saved successfully for {match_id}")
+            logger.info(f"✅ Transaction Complete: Match {match_id} finalized.")
             return True
+
         except Exception as e:
-            # Log the error so we don't lose track of money
-            print(f"CRITICAL ERROR in save_match_result: {e}")
+            logger.error(f"❌ CRITICAL TRANSACTION FAILURE for match {match_id}: {e}")
             return False
+
+    async def _quick_history_add(self, user_id, match_id, op_id, my_score, op_score, winner_id, session):
+        """Internal helper for history updates within a transaction."""
+        op_user = await self.collection.find_one({"_id": ObjectId(op_id)}, {"username": 1}, session=session)
+        op_name = op_user.get("username", "Opponent") if op_user else "Opponent"
+
+        result_str = "DRAW" if not winner_id else ("WON" if winner_id == user_id else "LOST")
+        
+        await self.collection.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$push": {
+                "recent_matches": {
+                    "$each": [{
+                        "match_id": match_id,
+                        "opponent_name": op_name,
+                        "result": result_str,
+                        "score": f"{my_score}-{op_score}",
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }],
+                    "$position": 0,
+                    "$slice": 20
+                }
+            }},
+            session=session
+        )

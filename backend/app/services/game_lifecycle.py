@@ -1,104 +1,115 @@
 import asyncio
 import json
+import logging
 from app.db.redis import redis_client
 from app.services.game_utils import to_str
+
+logger = logging.getLogger("uvicorn.error")
 
 async def wait_for_match_ready(match_key: str, user_id: str, timeout: int = 30):
     start_time = asyncio.get_event_loop().time()
     
     while (asyncio.get_event_loop().time() - start_time) < timeout:
-        raw_state = redis_client.hgetall(match_key)
+        # Use to_thread to keep the server responsive
+        raw_state = await asyncio.to_thread(redis_client.hgetall, match_key)
         match_state = {to_str(k): to_str(v) for k, v in raw_state.items()}
         
         rounds_json = match_state.get("rounds")
-        
         opponent_id = None
         opponent_name = "Waiting..."
         
+        # Faster lookup: Only iterate keys starting with "name:"
         for key, value in match_state.items():
             if key.startswith("name:") and key != f"name:{user_id}":
-                opponent_id = key.replace("name:", "")
+                opponent_id = key.split(":")[1]
                 opponent_name = value
                 break
         
         if rounds_json and opponent_id:
             return json.loads(rounds_json), opponent_name, opponent_id
         
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1.0) # Increased to 1s to save Upstash quota
         
     raise TimeoutError("Match initialization timed out.")
 
 async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_score, op_score, op_name, user_repo):
-    """
-    1. Sets a lock to ensure only one server processes the result.
-    2. Updates Redis INSTANTLY so the UI gets the result.
-    3. Saves to the DB in the background.
-    """
     match_key = f"match:live:{match_id}"
     lock_key = f"lock:finalizing:{match_id}"
     
-    # Try to acquire lock (valid for 30s)
-    if redis_client.set(lock_key, "true", nx=True, ex=30):
-        print(f"DEBUG: {user_id} acquired lock. Finalizing match...")
+    # Try to acquire lock atomically
+    locked = await asyncio.to_thread(redis_client.set, lock_key, "true", nx=True, ex=30)
+    
+    if locked:
+        logger.info(f"Finalizing match {match_id}. User {user_id} is processor.")
         
-        # 1. Prepare Data
-        # We fetch fresh scores just in case, though usually passed args are sufficient
-        final_my_score = int(redis_client.hget(match_key, f"score:{user_id}") or 0)
-        final_op_score = int(redis_client.hget(match_key, f"score:{opponent_id}") or 0)
+        # 1. Fetch fresh scores and names in one go
+        raw_data = await asyncio.to_thread(redis_client.hgetall, match_key)
+        match_data = {to_str(k): to_str(v) for k, v in raw_data.items()}
         
-        result_data = {
-            "summary": "Match Over",
-            "my_score": final_my_score,
-            "op_score": final_op_score,
+        f_my_score = int(match_data.get(f"score:{user_id}", 0))
+        f_op_score = int(match_data.get(f"score:{opponent_id}", 0))
+        my_name = match_data.get(f"name:{user_id}", "You")
+
+        # 2. Logic for Result
+        if result_type == "OPPONENT_FLED":
+            winner_id, loser_id = user_id, opponent_id
+            status_caller, status_op = "WON", "LOST"
+            summary_caller = "Opponent Disconnected! You Win!"
+            summary_op = "You abandoned the match."
+        else:
+            if f_my_score > f_op_score:
+                winner_id, loser_id = user_id, opponent_id
+                status_caller, status_op = "WON", "LOST"
+            elif f_op_score > f_my_score:
+                winner_id, loser_id = opponent_id, user_id
+                status_caller, status_op = "LOST", "WON"
+            else:
+                winner_id, loser_id = None, None
+                status_caller, status_op = "DRAW", "DRAW"
+            
+            summary_caller = f"Match {status_caller}"
+            summary_op = f"Match {status_op}"
+
+        # Prepare payloads
+        res_caller = {
+            "status": status_caller,
+            "summary": summary_caller,
+            "my_score": f_my_score,
+            "op_score": f_op_score,
             "opponent_name": op_name
         }
-        
-        result_for_caller = result_data.copy()
-        result_for_opponent = result_data.copy()
-        
-        # ---------------------------------------------------------
-        # 🚨 FIX: Handle OPPONENT_FLED Logic correctly
-        # ---------------------------------------------------------
-        if result_type == "OPPONENT_FLED":
-            # If opponent fled, the caller (survivor) WINS automatically
-            result_for_caller["status"] = "WON"
-            result_for_caller["summary"] = "Opponent Disconnected! You Win!"
-            
-            # The opponent effectively abandoned/lost
-            result_for_opponent["my_score"] = final_op_score
-            result_for_opponent["op_score"] = final_my_score
-            result_for_opponent["status"] = "LOST"
-            result_for_opponent["summary"] = "You abandoned the match."
-            
-        else:
-            # Standard Score Comparison
-            result_for_caller["status"] = "WON" if final_my_score > final_op_score else ("LOST" if final_op_score > final_my_score else "DRAW")
-            
-            result_for_opponent["my_score"] = final_op_score
-            result_for_opponent["op_score"] = final_my_score
-            result_for_opponent["status"] = "WON" if final_op_score > final_my_score else ("LOST" if final_my_score > final_op_score else "DRAW")
+        res_opponent = {
+            "status": status_op,
+            "summary": summary_op,
+            "my_score": f_op_score,
+            "op_score": f_my_score,
+            "opponent_name": my_name
+        }
 
-        # 2. ⚡ WRITE TO REDIS IMMEDIATELY
+        # 3. ⚡ ATOMIC REDIS PIPELINE
+        # ✅ FIX: Removed 'mapping' keyword. Calling hset with key-value pairs directly.
         pipe = redis_client.pipeline()
         pipe.hset(match_key, f"status:{user_id}", "FINISHED")
         pipe.hset(match_key, f"status:{opponent_id}", "FINISHED")
-        pipe.hset(match_key, f"final_result:{user_id}", json.dumps(result_for_caller))
-        pipe.hset(match_key, f"final_result:{opponent_id}", json.dumps(result_for_opponent))
+        pipe.hset(match_key, f"final_result:{user_id}", json.dumps(res_caller))
+        pipe.hset(match_key, f"final_result:{opponent_id}", json.dumps(res_opponent))
         pipe.hset(match_key, "finalized", "true")
         
-        # Upstash SDK uses .exec(), not .execute()
-        pipe.exec() 
-        
-        print(f"DEBUG: Results written to Redis for match {match_id}")
+        await asyncio.to_thread(pipe.exec) 
 
-        # 3. 🐢 SAVE TO DB IN BACKGROUND
+        # 4. 🐢 DB SYNC (Handles payouts and records)
         asyncio.create_task(
-            user_repo.save_match_result(
-                match_id, user_id, opponent_id, result_type, final_my_score, final_op_score
+            user_repo.process_match_payout(
+                match_id=match_id,
+                winner_id=winner_id,
+                player1_id=user_id,
+                player2_id=opponent_id,
+                p1_score=f_my_score,
+                p2_score=f_op_score,
+                is_draw=(winner_id is None)
             )
         )
         
-        return result_for_caller
+        return res_caller
     
-    print(f"DEBUG: {user_id} failed to get lock (already processing).")
     return None

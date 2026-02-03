@@ -8,6 +8,7 @@ from app.core.config import settings
 import logging
 import os
 from app.api import support
+
 # --- 📝 LOGGING SETUP ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("uvicorn.error")
@@ -97,4 +98,6 @@ def read_root():
 @app.get("/api/public/ping")
 async def public_ping():
     return {"status": "online", "nodes": "Glacia Connection Active"}
+
+
 
