@@ -1,10 +1,16 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: false, // 👈 Set to false to prevent double-rendering bugs
-  output: 'export',       // Keep this for Capacitor
+  reactStrictMode: true,
   images: {
-    unoptimized: true,    // Keep this for static export
+    // This tells Next.js that Cloudinary is a trusted source
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'res.cloudinary.com',
+        pathname: '/**', // This allows all images from your Cloudinary account
+      },
+    ],
   },
-}
+};
 
 export default nextConfig;
