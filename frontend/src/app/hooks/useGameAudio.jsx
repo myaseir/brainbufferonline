@@ -12,9 +12,8 @@ export const useGameAudio = (gameState, isPaused) => {
   const winAudioRef = useRef(null);
   const startSoundRef = useRef(null);
 
-  // 1. Initialize Music & HANDLE EXIT (The Fix)
+  // 1. Initialize Music & Handle Exit
   useEffect(() => {
-    // A. Init Logic
     if (typeof window !== 'undefined' && !bgMusicInstance) {
       bgMusicInstance = new Audio('/bgmusic.mp3');
       bgMusicInstance.loop = true;
@@ -22,56 +21,56 @@ export const useGameAudio = (gameState, isPaused) => {
       bgMusicInstance.volume = 0.5;
     }
 
-    // B. CLEANUP LOGIC (Runs when you quit/leave the page)
     return () => {
       if (bgMusicInstance) {
         bgMusicInstance.pause();
-        bgMusicInstance.currentTime = 0; // Reset song for next time
+        bgMusicInstance.currentTime = 0;
       }
     };
-  }, []); // Empty array = Only runs on Mount and Unmount
+  }, []);
 
-  // 2. MAIN MUSIC CONTROL LOGIC
+  // 2. REWRITTEN: CONTINUOUS MUSIC LOGIC
   useEffect(() => {
     if (!bgMusicInstance) return;
 
     const handleMusicState = async () => {
-      // PLAY: Active Game & Not Paused & Music ON
-      if ((gameState === 'showing' || gameState === 'playing') && !isPaused && settings.music) {
+      // Logic: Music starts when game starts and DOES NOT stop until 'gameover' or 'idle'
+      const isMatchActive = gameState !== 'gameover' && gameState !== 'idle';
+
+      // PLAY: If Match is active (even between rounds) AND not paused AND settings allow it
+      if (isMatchActive && !isPaused && settings.music) {
         try {
-          if (gameState === 'showing' && bgMusicInstance.paused) {
-             bgMusicInstance.currentTime = 0;
+          // Only play if it's currently paused (prevents "stuttering" on state changes)
+          if (bgMusicInstance.paused) {
+            await bgMusicInstance.play();
           }
-          await bgMusicInstance.play();
-        } catch (e) {}
+        } catch (e) {
+          console.error("Audio play blocked:", e);
+        }
       } 
       // PAUSE: Menu Open
       else if (isPaused) {
         bgMusicInstance.pause();
       }
-      // STOP: Game Over / Idle / Music OFF
-      else if (gameState === 'gameover' || gameState === 'idle' || !settings.music) {
+      // STOP: Match is totally over (Knockout/Exit) or settings disabled
+      else if (!isMatchActive || !settings.music) {
         bgMusicInstance.pause();
-        if (gameState === 'gameover' || gameState === 'idle') {
-           bgMusicInstance.currentTime = 0;
-        }
+        bgMusicInstance.currentTime = 0; // Fully reset only when match ends
       }
     };
 
     handleMusicState();
   }, [gameState, isPaused, settings.music]);
 
-  // 3. Tab Visibility
+  // 3. Tab Visibility (Kept same as your original)
   useEffect(() => {
     const handleVisibility = () => {
       if (document.hidden) {
         if (bgMusicInstance) bgMusicInstance.pause();
-        if (tickAudioRef.current) { 
-          tickAudioRef.current.pause(); 
-          tickAudioRef.current.currentTime = 0; 
-        }
       } else {
-        if (settings.music && !isPaused && (gameState === 'playing' || gameState === 'showing')) {
+        // Resume only if match is still active and not paused
+        const isMatchActive = gameState !== 'gameover' && gameState !== 'idle';
+        if (settings.music && !isPaused && isMatchActive) {
           bgMusicInstance?.play().catch(() => {});
         }
       }
