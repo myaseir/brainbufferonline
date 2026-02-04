@@ -13,36 +13,35 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
   
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
-  // --- 🔍 SEARCH LOGIC ---
-  useEffect(() => {
-    const delayDebounceFn = setTimeout(async () => {
-      if (searchQuery.length > 1) {
-        const token = localStorage.getItem('token');
-        const res = await fetch(`${API_URL}/api/friends/search?q=${searchQuery}`, {
-           headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await res.json();
-        setSearchResults(data);
-      } else {
-        setSearchResults([]);
-      }
-    }, 300);
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchQuery]);
-
-  // Actions (fetchFriends, fetchRequests, sendRequest etc logic stays the same)
+  // --- 📋 DATA FETCHING ---
   const fetchFriends = async () => {
     try {
       const token = localStorage.getItem('token');
       const res = await fetch(`${API_URL}/api/friends/list`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) {
-        const data = await res.json();
-        setFriends(data.map(f => ({ ...f, is_online: f.status === 'online' })));
+      if (!res.ok) return;
+      const data = await res.json();
+      
+      if (Array.isArray(data)) {
+        // 1. Map the data to include is_online
+        const mapped = data.map(f => ({
+            ...f,
+            is_online: f.status === 'online'
+        }));
+
+        // 2. 🔥 SORT: Online players first, then Offline players
+        const sorted = mapped.sort((a, b) => {
+            if (a.is_online === b.is_online) return 0;
+            return a.is_online ? -1 : 1;
+        });
+
+        setFriends(sorted);
       }
     } catch (err) { console.error(err); }
   };
+
+  // ... (fetchRequests, handleSearch, sendFriendRequest, handleChallenge remain the same)
 
   const fetchRequests = async () => {
     try {
@@ -74,6 +73,28 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
     }
   };
 
+  const acceptRequest = async (reqId) => {
+    const token = localStorage.getItem('token');
+    await fetch(`${API_URL}/api/friends/accept/${reqId}`, { 
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+    toast.success("Friend Added!");
+    fetchRequests(); 
+    fetchFriends();   
+  };
+
+  const declineRequest = async (reqId) => {
+    const token = localStorage.getItem('token');
+    setRequests(prev => prev.filter(r => r.request_id !== reqId));
+    toast("Request Declined", { icon: '🗑️' });
+    await fetch(`${API_URL}/api/friends/decline/${reqId}`, { 
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+    fetchRequests(); 
+  };
+
   useEffect(() => {
     if (isOpen) {
       const initData = async () => {
@@ -83,7 +104,29 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
       };
       initData();
     }
+    const interval = setInterval(() => {
+        fetchRequests();
+        if(isOpen) fetchFriends();
+    }, 10000);
+    return () => clearInterval(interval);
   }, [isOpen]);
+
+  // Debounced Search Effect
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (searchQuery.length > 1) {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`${API_URL}/api/friends/search?q=${searchQuery}`, {
+           headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        setSearchResults(data);
+      } else {
+        setSearchResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchQuery]);
 
   if (!isOpen) return null;
 
@@ -103,7 +146,7 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
           </button>
         </div>
 
-        {/* 🔍 SEARCH BOX (FULL WIDTH FIX) */}
+        {/* 🔍 SEARCH BOX (Full Width Fixed) */}
         <div className="px-4 py-4 border-b border-slate-50">
           <div className="flex items-center w-full bg-slate-50 border border-slate-200 rounded-xl px-3 focus-within:ring-2 focus-within:ring-emerald-500/20 focus-within:border-emerald-500 transition-all">
             <Search className="text-slate-400 shrink-0" size={18} />
@@ -116,7 +159,6 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
             />
           </div>
           
-          {/* Results Dropdown */}
           {searchQuery.length > 1 && (
             <div className="absolute left-4 right-4 mt-2 bg-white border border-slate-100 rounded-xl shadow-xl z-[60] overflow-hidden">
                 {searchResults.length === 0 ? (
@@ -146,7 +188,7 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
           {loading ? (
             <div className="flex flex-col items-center justify-center h-64 space-y-4">
               <Loader2 className="text-emerald-500 animate-spin w-10 h-10" />
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse tracking-widest">Syncing Data...</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse tracking-widest">Syncing Hub...</p>
             </div>
           ) : activeTab === 'friends' ? (
             friends.length === 0 ? <div className="text-center mt-10 text-slate-400 text-sm italic">No friends yet.</div> :
@@ -163,22 +205,22 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
                         </div>
                     </div>
                     {f.is_online && (
-                        <button onClick={() => window.sendChallenge?.(f.id, currentUser?.username)} className="flex items-center gap-1.5 bg-slate-900 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase hover:bg-emerald-500 transition-all">
+                        <button onClick={() => window.sendChallenge?.(f.id, currentUser?.username)} className="flex items-center gap-1.5 bg-slate-900 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase hover:bg-emerald-500 transition-all active:scale-95">
                             <Zap size={12} /> Battle
                         </button>
                     )}
                 </div>
             ))
           ) : (
-             requests.map(req => (
+            requests.map(req => (
                 <div key={req.request_id} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl shadow-sm">
                     <div className="flex items-center gap-3">
                          <div className="w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center text-slate-500 text-xs font-bold uppercase">{req.username[0]}</div>
                         <span className="text-sm font-bold text-slate-700">{req.username}</span>
                     </div>
                     <div className="flex gap-2">
-                        <button onClick={() => acceptRequest(req.request_id)} className="p-2 bg-emerald-100 text-emerald-600 rounded-lg hover:bg-emerald-200 transition-colors"><Check size={16}/></button>
-                        <button onClick={() => declineRequest(req.request_id)} className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"><X size={16}/></button>
+                        <button onClick={() => acceptRequest(req.request_id)} className="p-2 bg-emerald-100 text-emerald-600 rounded-lg hover:bg-emerald-200"><Check size={16}/></button>
+                        <button onClick={() => declineRequest(req.request_id)} className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200"><X size={16}/></button>
                     </div>
                 </div>
             ))
