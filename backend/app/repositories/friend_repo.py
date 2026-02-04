@@ -1,6 +1,8 @@
 from app.db.mongodb import db
 from bson import ObjectId
 from datetime import datetime
+from app.db.redis import redis_client  # ✅ Import Redis for live status
+from app.services.game_utils import to_str
 
 class FriendRepository:
     def __init__(self):
@@ -50,7 +52,7 @@ class FriendRepository:
 
     async def get_friends(self, user_id: str):
         """
-        🚀 OPTIMIZED: Fetches all friend profiles in bulk.
+        🚀 OPTIMIZED: Fetches profiles AND live status from Redis.
         """
         # 1. Get all accepted friendship documents
         cursor = self.collection.find({
@@ -68,15 +70,26 @@ class FriendRepository:
             fid = doc["recipient_id"] if doc["requester_id"] == user_id else doc["requester_id"]
             friend_ids.append(ObjectId(fid))
 
-        # 🚀 3. BATCH QUERY: Fetch all user profiles at once
+        # 3. Batch Fetch Profiles
         profiles = await self.users.find({"_id": {"$in": friend_ids}}).to_list(length=200)
         
-        # 4. Format for frontend
-        return [{
-            "id": str(u["_id"]),
-            "username": u.get("username", "Unknown"),
-            "avatar": u.get("avatar_url", "/default-avatar.png")
-        } for u in profiles]
+        # 4. ⚡ FETCH LIVE STATUS FROM REDIS
+        results = []
+        for u in profiles:
+            u_id = str(u["_id"])
+            
+            # Check Redis for status (e.g., "user_status:12345" -> "online")
+            # Note: Ensure your LobbyManager sets this key in Redis!
+            status = redis_client.get(f"user_status:{u_id}")
+            
+            results.append({
+                "id": u_id,
+                "username": u.get("username", "Unknown"),
+                "avatar": u.get("avatar_url", "/default-avatar.png"),
+                "status": to_str(status) if status else "offline" # ✅ Default to offline
+            })
+            
+        return results
 
     async def get_pending_requests(self, user_id: str):
         """
@@ -91,7 +104,7 @@ class FriendRepository:
         # 2. Extract requester IDs
         requester_ids = [ObjectId(doc["requester_id"]) for doc in request_docs]
 
-        # 🚀 3. BATCH QUERY: Fetch all profiles
+        # 3. Batch Fetch Profiles
         profiles = await self.users.find({"_id": {"$in": requester_ids}}).to_list(length=100)
         profile_map = {str(p["_id"]): p for p in profiles}
 

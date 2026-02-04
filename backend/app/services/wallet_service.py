@@ -15,13 +15,13 @@ class WalletService:
         """
         db = self.user_repo.collection.database
         
-        # 1. 🚀 DISTRIBUTED LOCK: Prevent two admins from approving the same TRX at once
+        # 1. 🚀 DISTRIBUTED LOCK
         lock_key = f"lock:deposit_process:{trx_id}"
         if not redis_client.set(lock_key, "processing", ex=30, nx=True):
             return {"status": "processing_by_another_instance"}
 
         try:
-            # 2. Check Idempotency (Permanent Record)
+            # 2. Check Idempotency
             existing_tx = await db["transactions"].find_one({"provider_reference": trx_id, "type": "DEPOSIT"})
             if existing_tx:
                 return {"status": "already_processed"}
@@ -44,7 +44,6 @@ class WalletService:
                 "timestamp": datetime.now(timezone.utc)
             })
             
-            # Clear total economy cache so stats refresh
             redis_client.delete("stats:total_pool")
             return {"status": "success"}
         finally:
@@ -52,14 +51,12 @@ class WalletService:
 
     async def deduct_entry_fee(self, user_id: str, fee: float = 50.0):
         """
-        Uses an ATOMIC MongoDB filter to check balance and deduct in ONE step.
-        This is the only way to prevent negative balances at high scale.
+        Atomic deduction. Only allows if funds exist.
         """
-        # We don't "Get" then "Deduct". We "Deduct IF balance >= fee".
         result = await self.user_repo.collection.update_one(
             {
                 "_id": ObjectId(user_id), 
-                "wallet_balance": {"$gte": fee} # The Bouncer: Only allow if funds exist
+                "wallet_balance": {"$gte": fee} 
             },
             {"$inc": {"wallet_balance": -fee}}
         )
@@ -69,19 +66,23 @@ class WalletService:
             
         return True
 
-    async def settle_match_winner(self, winner_id: str, payout: float = 90.0):
-        """Awards prize and triggers a leaderboard update in Redis."""
-        await self.user_repo.update_wallet(winner_id, payout)
+    # ✅ RENAMED to match game_lifecycle.py
+    async def payout_winnings(self, user_id: str, amount: float):
+        """
+        Awards prize money to the winner.
+        """
+        # 1. Update Wallet
+        await self.user_repo.update_wallet(user_id, amount)
         
-        # This call now updates both MongoDB and the Redis Sorted Set Leaderboard
-        await self.user_repo.record_match_stats(winner_id, is_win=True)
+        # 2. Update Stats (Wins, Leaderboard Score)
+        await self.user_repo.record_match_stats(user_id, is_win=True)
         
-        return {"status": "payout_complete"}
+        return True
 
-    async def refund_draw(self, player_ids: list, refund_amount: float = 50.0):
-        """Atomic refunds for both players."""
-        for pid in player_ids:
-            await self.user_repo.update_wallet(pid, refund_amount)
-            # Record the match as a draw (not a win)
-            await self.user_repo.record_match_stats(pid, is_win=False)
-        return {"status": "refund_complete"}
+    # ✅ RENAMED/SIMPLIFIED to match game_lifecycle.py
+    async def refund_user(self, user_id: str, amount: float):
+        """
+        Refunds a single user (used for Draws or Aborted matches).
+        """
+        await self.user_repo.update_wallet(user_id, amount)
+        return True

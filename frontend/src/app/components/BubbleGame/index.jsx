@@ -7,41 +7,41 @@ import OfflineUI from './OfflineUI';
 import OnlineUI from './OnlineUI';
 import { 
   Trophy, X, MinusCircle, RotateCcw, Share2, 
-  Coins, UserX, AlertTriangle, LogOut // ✅ Added LogOut Icon
+  Coins, UserX, AlertTriangle, LogOut 
 } from 'lucide-react';
 import { useBubbleGame } from '../../hooks/useBubbleGame'; 
 
 const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart = null, onRequeue = null }) => {
   
-  // 🧠 THE BRAIN
+  // 🧠 THE BRAIN: Hook handles all logic, networking, and state
   const logic = useBubbleGame({ mode, socket, onQuit, onRestart, onRequeue });
 
-  // 🎨 HELPER: Determine Result Styling & Data
+  // 🎨 HELPER: Determine Result Styling & Data based on Server Response
   const resultData = useMemo(() => {
-    // 1. Check for Disconnects first based on the summary message
-    const isDisconnect = logic.resultMessage?.toLowerCase().includes('disconnected') || logic.resultMessage?.toLowerCase().includes('left');
+    const isDisconnect = logic.resultMessage?.toLowerCase().includes('disconnected') || 
+                         logic.resultMessage?.toLowerCase().includes('left') ||
+                         logic.resultMessage?.toLowerCase().includes('fled');
     
+    // 1. Victory by Abandonment (Rage Quit)
     if (isDisconnect && logic.won) {
       return {
         title: "Opponent Fled",
-        subtitle: "Automatic Victory",
+        subtitle: "Victory by Default",
         icon: UserX,
-        color: "emerald",
         bg: "bg-emerald-50",
         text: "text-emerald-600",
         border: "border-emerald-100",
-        pkr: "+90 PKR",
+        pkr: "+90 PKR", 
         pkrColor: "text-emerald-600"
       };
     }
 
-    // 2. Standard Outcomes
+    // 2. Standard Draw (Refunded)
     if (logic.isDraw) {
       return {
         title: "Match Draw",
-        subtitle: "Equal Proficiency",
+        subtitle: "Equal Skill Level",
         icon: MinusCircle,
-        color: "amber",
         bg: "bg-amber-50",
         text: "text-amber-600",
         border: "border-amber-100",
@@ -50,12 +50,12 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
       };
     }
     
+    // 3. Normal Win
     if (logic.won) {
       return {
         title: "Victory!",
-        subtitle: "Dominant Performance",
+        subtitle: "Clean Sweep",
         icon: Trophy,
-        color: "emerald",
         bg: "bg-emerald-50",
         text: "text-emerald-600",
         border: "border-emerald-100",
@@ -64,12 +64,11 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
       };
     }
     
-    // Loss
+    // 4. Normal Loss
     return {
       title: "Defeat",
-      subtitle: "Better Luck Next Time",
+      subtitle: "Close Match",
       icon: X,
-      color: "red",
       bg: "bg-red-50",
       text: "text-red-500",
       border: "border-red-100",
@@ -148,22 +147,31 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
         </div>
       )}
 
-      {/* 🏆 PROFESSIONAL RESULT SCREEN */}
-      {logic.gameState === 'gameover' && !logic.waitingForResult && (
+      {/* 🔄 SYNCING OVERLAY: Fix for Slow Internet/Late Results */}
+      {logic.gameState === 'syncing' && (
+        <div className="absolute inset-0 bg-white/80 backdrop-blur-md flex flex-col items-center justify-center z-[140] animate-in fade-in duration-500">
+          <div className="relative w-20 h-20 mb-6">
+            <div className="absolute inset-0 border-4 border-slate-100 rounded-full"></div>
+            <div className="absolute inset-0 border-4 border-emerald-500 rounded-full border-t-transparent animate-spin"></div>
+          </div>
+          <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Syncing Results</h3>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-2">Verifying battle data with arena...</p>
+        </div>
+      )}
+
+      {/* 🏆 PROFESSIONAL RESULT SCREEN: Only shows when data is official */}
+      {logic.gameState === 'gameover' && !logic.waitingForResult && logic.resultMessage && (
          <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-xl flex items-center justify-center z-[150] p-6 animate-in fade-in zoom-in duration-300">
              <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full shadow-2xl relative overflow-hidden border border-white/50">
                 
-                {/* Decorative Background Glow for Winners */}
                 {logic.won && (
                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-32 bg-gradient-to-b from-emerald-100/50 to-transparent blur-3xl -z-10 pointer-events-none" />
                 )}
 
-                {/* 1. STATUS ICON */}
                 <div className={`w-24 h-24 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-xl transform transition-transform hover:scale-105 border-4 border-white ${resultData.bg} ${resultData.text}`}>
                   <Icon size={48} strokeWidth={2.5} />
                 </div>
 
-                {/* 2. HEADLINES */}
                 <div className="text-center mb-6">
                    <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter mb-1">
                      {resultData.title}
@@ -173,7 +181,6 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
                    </p>
                 </div>
 
-                {/* 3. FINANCIAL RESULT (Online Only) */}
                 {mode === 'online' && (
                   <div className={`flex items-center justify-center gap-2 mb-8 py-3 px-6 rounded-2xl border ${resultData.bg} ${resultData.border}`}>
                      <Coins size={18} className={resultData.pkrColor} />
@@ -183,18 +190,14 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
                   </div>
                 )}
 
-                {/* 4. SCOREBOARD */}
                 <div className="flex justify-between items-center gap-4 mb-8">
-                    {/* User */}
                     <div className="flex-1 text-center bg-slate-50 p-4 rounded-2xl border border-slate-100">
                         <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">You</span>
                         <div className="text-2xl font-black text-slate-800">{logic.score}</div>
                     </div>
 
-                    {/* VS Divider */}
                     <div className="text-slate-300 font-black text-xs">VS</div>
 
-                    {/* Opponent */}
                     <div className="flex-1 text-center bg-slate-50 p-4 rounded-2xl border border-slate-100">
                          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
                            {mode === 'online' ? logic.opponentName : 'Best'}
@@ -205,7 +208,6 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
                     </div>
                 </div>
 
-                {/* 5. SPECIFIC MESSAGE (Disconnects, etc) */}
                 {logic.resultMessage && (
                   <div className="bg-slate-50 border border-slate-200 text-slate-500 px-4 py-3 rounded-xl text-[10px] font-bold uppercase tracking-wide mb-6 text-center flex items-center justify-center gap-2">
                     <AlertTriangle size={14} className="text-slate-400"/>
@@ -213,9 +215,7 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
                   </div>
                 )}
 
-                {/* 6. ACTIONS */}
                 <div className="space-y-3">
-                   {/* PRIMARY BUTTON: Replay (Offline) OR Return (Online) */}
                    <button 
                       onClick={() => mode === 'offline' ? logic.startGame() : onQuit()} 
                       className="w-full bg-slate-900 hover:bg-black text-white py-4 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-xl shadow-slate-200"
@@ -223,7 +223,6 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
                       {mode === 'offline' ? 'Replay Mission' : 'Return to Dashboard'} <RotateCcw size={16}/>
                    </button>
 
-                   {/* ✅ NEW BUTTON: Exit (Offline Only) */}
                    {mode === 'offline' && (
                      <button 
                         onClick={onQuit}
@@ -233,7 +232,6 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
                      </button>
                    )}
                    
-                   {/* SHARE BUTTON */}
                    <button onClick={logic.shareScore} className="w-full bg-white border-2 border-slate-100 text-slate-500 font-bold py-3 rounded-xl hover:bg-slate-50 hover:border-slate-200 transition-all uppercase tracking-widest text-[10px] flex items-center justify-center gap-2">
                       Share Result <Share2 size={14}/>
                    </button>

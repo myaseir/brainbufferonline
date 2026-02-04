@@ -1,21 +1,21 @@
 import uuid
-import asyncio  # 🚀 ADDED: Required for the heartbeat task
+import asyncio
+import json
+import logging
+from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
 from app.services.game_redis import get_user_from_token
 from app.services.lobby_manager import lobby_manager
 from app.services.wallet_service import WalletService
+from app.db.redis import redis_client
 
 router = APIRouter()
+logger = logging.getLogger("uvicorn.error")
 
 @router.websocket("/ws/lobby")
 async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
     """
-    Global Lobby Socket optimized for Render.
-    Handles:
-    1. Online Presence (Green dot in friend list)
-    2. Sending/Receiving Challenges
-    3. Money Transaction for Challenges
-    4. Heartbeat to maintain connection
+    Global Lobby Socket optimized for production and Redis Free Tier.
     """
     
     # 1. Authenticate
@@ -27,34 +27,32 @@ async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
     # 2. Connect to Lobby Manager
     await lobby_manager.connect(user_id, websocket)
 
-    # 🚀 3. HEARTBEAT TASK: Prevents Render from killing the socket
+    # 🚀 3. HEARTBEAT TASK
     async def heartbeat():
         try:
             while True:
-                await asyncio.sleep(25)  # Send every 25s (Render timeout is ~55s)
+                await asyncio.sleep(25)
                 await websocket.send_json({"type": "ping"})
+        except asyncio.CancelledError:
+            pass
         except Exception:
-            # Task will be cancelled automatically on disconnect
             pass
 
-    # Start heartbeat in background
     heartbeat_task = asyncio.create_task(heartbeat())
 
     try:
         while True:
-            # 4. Receive messages from client
             data = await websocket.receive_json()
             msg_type = data.get('type')
 
-            # Ignore incoming pings from client if they send any
-            if msg_type == 'pong' or msg_type == 'ping':
+            if msg_type in ['pong', 'ping']:
                 continue
 
             # ==========================================
-            # 1. SEND CHALLENGE (Signal only)
+            # 1. SEND CHALLENGE
             # ==========================================
             if msg_type == 'SEND_CHALLENGE':
-                target_id = data['target_id']
+                target_id = data.get('target_id')
                 challenger_name = data.get('username', 'Unknown')
                 
                 sent = await lobby_manager.send_personal_message({
@@ -65,44 +63,54 @@ async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
                 }, target_id)
                 
                 if not sent:
-                    await websocket.send_json({"type": "ERROR", "message": "User is offline or not in lobby"})
+                    await websocket.send_json({"type": "ERROR", "message": "User is offline"})
 
             # ==========================================
-            # 2. ACCEPT CHALLENGE (Money Handling)
+            # 2. ACCEPT CHALLENGE
             # ==========================================
             elif msg_type == 'ACCEPT_CHALLENGE':
-                challenger_id = data['challenger_id']
+                challenger_id = data.get('challenger_id')
                 accepter_id = user_id
-                
                 wallet = WalletService()
                 bet_amount = 50.0
 
                 try:
-                    # Charge Challenger
                     await wallet.deduct_entry_fee(challenger_id, bet_amount)
                 except HTTPException:
-                    error_msg = {"type": "ERROR", "message": "Match Failed: Challenger has insufficient funds"}
+                    error_msg = {"type": "ERROR", "message": "Challenger has insufficient funds"}
                     await websocket.send_json(error_msg)
                     await lobby_manager.send_personal_message(error_msg, challenger_id)
                     continue
 
                 try:
-                    # Charge Accepter (Me)
                     await wallet.deduct_entry_fee(accepter_id, bet_amount)
                 except HTTPException:
-                    # Refund Challenger
-                    await wallet.user_repo.update_wallet(challenger_id, bet_amount)
-                    
-                    error_msg = {"type": "ERROR", "message": "Match Failed: You have insufficient funds"}
+                    await wallet.refund_user(challenger_id, bet_amount)
+                    error_msg = {"type": "ERROR", "message": "Insufficient funds for entry fee"}
                     await websocket.send_json(error_msg)
                     await lobby_manager.send_personal_message({
                         "type": "ERROR", 
-                        "message": "Match declined: Opponent has insufficient funds (Your fee was refunded)"
+                        "message": "Opponent has insufficient funds. Fee refunded."
                     }, challenger_id)
                     continue
 
-                # Success! Start the Game
+                # C. Success: Register Match in Redis
                 match_id = f"match_{uuid.uuid4().hex[:8]}"
+                match_key = f"match:live:{match_id}"
+
+                # ✅ FIXED: Flattening the dictionary for Upstash compatibility
+                # We pass the key-value pairs directly into hset
+                pipe = redis_client.pipeline()
+                pipe.hset(match_key, "p1_id", challenger_id)
+                pipe.hset(match_key, "p2_id", accepter_id)
+                pipe.hset(match_key, "bet_pkr", str(bet_amount))
+                pipe.hset(match_key, "status", "CREATED")
+                pipe.hset(match_key, "mode", "challenge")
+                pipe.hset(match_key, "created_at", str(datetime.now()))
+                
+                pipe.expire(match_key, 600) 
+                await asyncio.to_thread(pipe.exec)
+
                 start_msg = {
                     "type": "MATCH_START", 
                     "match_id": match_id,
@@ -113,30 +121,12 @@ async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
                 await lobby_manager.send_personal_message(start_msg, challenger_id)
 
     except WebSocketDisconnect:
-        # 🟢 Normal Closure: User closed the tab or app. No error logging needed.
         pass 
     
     except Exception as e:
-        # 🔴 Unexpected Error: Log this for debugging (e.g., Sentry or CloudWatch)
-        print(f"⚠️ Critical Lobby Error for User {user_id}: {e}")
+        logger.error(f"⚠️ Critical Lobby Error for User {user_id}: {e}")
     
     finally:
-        # 🚀 5. PROFESSIONAL CLEANUP ROUTINE
-        # This block ALWAYS runs, even if the server crashes or user disconnects.
-        
-        # A. Stop the Heartbeat Task
-        # Prevents "Task was destroyed but it is pending" warnings in logs
         if not heartbeat_task.done():
             heartbeat_task.cancel()
-
-        # B. Remove from Lobby Memory
-        # Immediately stops anyone else from trying to send challenges to this dead socket
         await lobby_manager.disconnect(user_id)
-
-        # C. Broadcast "Offline" Status
-        # 🛡️ Fairness: Instantly tells friends "I am gone" so they don't waste time challenging me.
-        try:
-            await lobby_manager.broadcast_user_status(user_id, "offline")
-        except Exception as broadcast_error:
-            # If Redis/DB fails, just log it. Don't let it crash the whole cleanup.
-            print(f"Failed to broadcast offline status for {user_id}: {broadcast_error}")

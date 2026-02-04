@@ -44,17 +44,14 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
   // --- REFS ---
   const serverRoundsRef = useRef(null); 
   const currentStepRef = useRef(0);
-  const waitingTimeoutRef = useRef(null);
   const roundTimerRef = useRef(null);
   const countdownIntervalRef = useRef(null);
   const hideTimerRef = useRef(null);
   const roundEndTimeRef = useRef(0); 
   const processingClickRef = useRef(new Set());
   const scoreRef = useRef(0);
-  
-  // 🔒 THE KILL SWITCH REF
-  const matchEndedRef = useRef(false);
-  
+  const matchEndedRef = useRef(false); // 🔒 THE KILL SWITCH
+
   const maxRound = 20;
 
   // --- TIMERS & CLEANUP ---
@@ -69,26 +66,42 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
   }, [audioRefs.tick]);
 
   // --- GAME LOOP LOGIC ---
-  const handleGameOver = (isForfeit = false) => {
+ const handleGameOver = (forfeit = false) => {
+    if (matchEndedRef.current) return;
+
     clearAllTimers(); 
     setRoundTimer(0); 
-    setGameState('gameover');
+    setIsForfeit(forfeit);
     
-    if (mode === 'online' && socket && !isForfeit) {
-       setWaitingForResult(true);
+    if (mode === 'online') {
+        // 1. Enter a specific "Syncing" state instead of generic "gameover"
+        setGameState('syncing'); 
+        setWaitingForResult(true);
+        
+        if (socket && socket.readyState === WebSocket.OPEN && !forfeit) {
+            socket.send(JSON.stringify({ type: 'GAME_OVER', score: scoreRef.current }));
+        }
+    } else {
+        // Offline mode can jump straight to gameover
+        setGameState('gameover');
+        setWon(score > highScore);
     }
+    
     playSound(audioRefs.gameOver);
   };
 
   const startTimer = (durationMs) => {
-    if (matchEndedRef.current) return; // 🔒 Stop if match is dead
+    if (matchEndedRef.current) return;
 
     if (roundTimerRef.current) clearInterval(roundTimerRef.current);
     roundEndTimeRef.current = Date.now() + durationMs;
     const roundTotalDuration = Math.max(10000 - ((round - 1) * 500), 2000);
 
     roundTimerRef.current = setInterval(() => {
-      if (matchEndedRef.current) { clearInterval(roundTimerRef.current); return; } // 🔒 Double check
+      if (matchEndedRef.current) { 
+        clearInterval(roundTimerRef.current); 
+        return; 
+      }
 
       const now = Date.now();
       const msLeft = roundEndTimeRef.current - now;
@@ -96,10 +109,6 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
       if (msLeft <= 0) {
         clearInterval(roundTimerRef.current);
         setRoundTimer(0);
-        
-        if (mode === 'online' && socket) {
-           socket.send(JSON.stringify({ type: 'GAME_OVER', score: scoreRef.current }));
-        }
         handleGameOver();
       } else {
         const progress = (roundTotalDuration - msLeft) / roundTotalDuration;
@@ -114,7 +123,7 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
   };
 
   const startRound = useCallback((roundNum) => {
-      if (matchEndedRef.current) return; // 🔒 
+      if (matchEndedRef.current) return;
 
       clearAllTimers(); 
       setRoundTimer(10); 
@@ -126,7 +135,10 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
       
       let counter = 3;
       countdownIntervalRef.current = setInterval(() => {
-        if (matchEndedRef.current) { clearInterval(countdownIntervalRef.current); return; } // 🔒
+        if (matchEndedRef.current) { 
+            clearInterval(countdownIntervalRef.current); 
+            return; 
+        }
 
         counter -= 1;
         if (counter > 0) {
@@ -140,10 +152,6 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
              if (roundData) {
                setNumbers(roundData.numbers);
                setPositions(roundData.positions);
-             } else {
-               const count = Math.min(3 + Math.floor((roundNum - 1) / 2), 8); 
-               setNumbers(generateNumbers(count));
-               setPositions(generatePositions(count));
              }
           } else {
             const count = Math.min(3 + Math.floor((roundNum - 1) / 2), 8); 
@@ -159,10 +167,7 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
   }, [mode, generateNumbers, generatePositions, clearAllTimers]);
 
   const startGame = useCallback(() => {
-      if (mode === 'online' && !serverRoundsRef.current) return;
-      
-      // Reset everything strictly
-      matchEndedRef.current = false; // 🔓 Unlock
+      matchEndedRef.current = false; 
       clearAllTimers();
       processingClickRef.current.clear(); 
 
@@ -173,6 +178,7 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
       setWon(false);
       setIsDraw(false);
       setError(false);
+      setIsForfeit(false);
       setClickedNumbers([]);
       setCorrectNumbers([]);
       setRoundTimer(10); 
@@ -182,11 +188,11 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
       setResultMessage(null); 
       startRound(1);
       if (settings.music && !document.hidden) bgMusicInstance?.play().catch(() => {});
-  }, [mode, startRound, clearAllTimers, settings.music, bgMusicInstance]);
+  }, [startRound, clearAllTimers, settings.music, bgMusicInstance]);
 
   // --- CLICK HANDLER ---
   const handleClick = (num) => {
-    // 🔒 Strict Block
+    // 🔒 Critical: If server already ended the match, ignore all clicks
     if (matchEndedRef.current || gameState !== 'playing' || isPaused || error) return;
     
     if (processingClickRef.current.has(num)) return;
@@ -215,22 +221,13 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
       if (currentStepRef.current === sorted.length) {
         clearAllTimers();
         if (round >= maxRound) {
-          if (mode === 'online' && socket) {
-            socket.send(JSON.stringify({ type: 'GAME_OVER', score: newScore }));
-            setWaitingForResult(true);
-          } else {
-            setWon(true);
-            playSound(audioRefs.win);
-          }
           handleGameOver();
         } else {
           if (mode === 'online' && socket) {
             socket.send(JSON.stringify({ type: 'SCORE_UPDATE', score: newScore }));
           }
-          if (!error) {
-            setShowPerfectRound(true);
-            setTimeout(() => setShowPerfectRound(false), 1200);
-          }
+          setShowPerfectRound(true);
+          setTimeout(() => setShowPerfectRound(false), 1200);
           setRound(r => r + 1);
           setTimeout(() => startRound(round + 1), 1000);
         }
@@ -240,20 +237,14 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
       setError(true);
       vibrate(200);
       playSound(audioRefs.wrong);
-
-      setTimeout(() => {
-        if (mode === 'online' && socket) {
-          socket.send(JSON.stringify({ type: 'GAME_OVER', score: scoreRef.current }));
-        }
-        handleGameOver();
-      }, 600);
+      // In online mode, we wait for server to tell us we lost, but locally we stop game
+      setTimeout(() => handleGameOver(), 600);
     }
   };
 
   // --- ACTIONS ---
   const togglePause = () => {
-    if (matchEndedRef.current || gameState === 'idle' || gameState === 'gameover') return;
-    if (mode === 'online') return; 
+    if (matchEndedRef.current || mode === 'online' || gameState === 'idle' || gameState === 'gameover') return; 
 
     if (!isPaused) {
         setIsPaused(true);
@@ -292,56 +283,49 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
       }
   };
 
+  // --- 🚀 STATUS WATCHER (HEARTBEAT) ---
+  // If the user's internet is slow, this helps detect if the server already ended the match
+  useEffect(() => {
+    if (mode !== 'online' || gameState !== 'playing' || !socket || socket.readyState !== WebSocket.OPEN) return;
+
+    const statusCheck = setInterval(() => {
+        socket.send(JSON.stringify({ type: 'PING' }));
+    }, 5000);
+
+    return () => clearInterval(statusCheck);
+  }, [mode, gameState, socket]);
+
   // --- SOCKET EFFECT ---
   useEffect(() => {
     if (mode === 'online' && socket) {
-      setConnectionStatus('Connected. Waiting for Opponent...');
-      let readyInterval = null;
-
-      const sendReady = () => {
-         if (socket.readyState === WebSocket.OPEN && !serverRoundsRef.current) {
-            console.log("Sending CLIENT_READY...");
-            socket.send(JSON.stringify({ type: "CLIENT_READY" }));
-         }
-      };
-
-      sendReady();
-      socket.onopen = sendReady;
-
-      readyInterval = setInterval(() => {
-        if (serverRoundsRef.current) {
-            clearInterval(readyInterval); 
-        } else {
-            sendReady();
-        }
-      }, 1000);
+      setConnectionStatus('Awaiting Arena Initialization...');
 
       const handleSocketMessage = (event) => {
         try {
           const data = JSON.parse(event.data);
           
-          // 🛡️ SECURITY: If match is declared dead, IGNORE ALL future syncs/updates
-          if (matchEndedRef.current && data.type !== 'MATCH_ABORTED') {
-             console.warn("Ignoring packet (Match Ended):", data.type);
-             return; 
-          }
+          // If match is already marked as ended locally, only allow specific "un-abort" messages if applicable
+          // Otherwise, ignore game state updates once match is finalized
+          if (matchEndedRef.current && data.type !== 'RESULT' && data.type !== 'MATCH_ABORTED') return; 
 
           if (data.type === 'GAME_START') { 
-            console.log("GAME STARTED!");
-            clearInterval(readyInterval); 
+            console.log("🚀 BATTLE START");
             setShowTutorial(false); 
-            matchEndedRef.current = false; // Ensure it's unlocked
+            matchEndedRef.current = false;
+            setReconnectTimer(null);
             
             serverRoundsRef.current = data.rounds; 
             if(data.opponent_name) setOpponentName(data.opponent_name);
-            setScore(data.your_current_score || 0);
-            scoreRef.current = data.your_current_score || 0;
-            setOpponentScore(data.op_current_score || 0);
+            
+            setScore(0);
+            scoreRef.current = 0;
+            setOpponentScore(0);
             setConnectionStatus('Match Starting...');
             startGame();
           } 
           else if (data.type === 'WAITING_FOR_OPPONENT') {
             setReconnectTimer(data.seconds_left);
+            toast("Opponent connection unstable...", { icon: '⏳' });
           }
           else if (data.type === 'SYNC_STATE') {
             setReconnectTimer(null);
@@ -355,79 +339,65 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
              setOpponentScore(data.score);
              toast.success(`Opponent Finished! Score: ${data.score}`, { icon: '🏁' });
           }
-          // 🚨 CRITICAL FIX: MATCH ABORTED LOGIC
           else if (data.type === 'MATCH_ABORTED') {
-            matchEndedRef.current = true; // 🔒 LOCK THE GAME IMMEDIATELY
+            matchEndedRef.current = true;
             clearAllTimers();
-            
-            clearInterval(readyInterval);
-            const leaver = data.leaver_name || 'Opponent';
-            setConnectionStatus(`${leaver} left. Refunded.`); 
-            
-            // Force game over state so UI blocks interaction
             setGameState('gameover');
-            setResultMessage(`${leaver} Disconnected`);
-            
-            setTimeout(() => { if (onRequeue) onRequeue(); else if (onQuit) onQuit(); }, 3000);
+            setWaitingForResult(false);
+            setResultMessage(data.reason || `${data.leaver_name || 'Opponent'} Disconnected`);
+            toast.error("Match Cancelled: Entry Fee Refunded");
           }
-          // 🚨 CRITICAL FIX: RESULT LOGIC
           else if (data.type === 'RESULT') {
-            matchEndedRef.current = true; // 🔒 LOCK THE GAME IMMEDIATELY
+            // 🚀 THE KILL SWITCH: Force match to end regardless of local state
+            matchEndedRef.current = true;
             clearAllTimers();
-            
-            socket.onclose = null;
-            socket.onerror = null;
-            
-            if (waitingTimeoutRef.current) {
-              clearTimeout(waitingTimeoutRef.current);
-              waitingTimeoutRef.current = null;
-            }
             
             setWaitingForResult(false);
             setScore(data.my_score);
             scoreRef.current = data.my_score;
             setOpponentScore(data.op_score);
-
-            if (data.summary) {
-              setResultMessage(data.summary);
-            }
+            setResultMessage(data.summary); 
 
             if (data.status === "DRAW") {
-              setIsDraw(true); setWon(false);
+              setIsDraw(true); 
+              setWon(false);
             } else if (data.status === "WON") {
-              setWon(true); setIsDraw(false);
+              setWon(true);
+              setIsDraw(false);
               playSound(audioRefs.win);
             } else {
-              setWon(false); setIsDraw(false);
+              setWon(false);
+              setIsDraw(false);
               playSound(audioRefs.gameOver);
             }
             setGameState('gameover'); 
           }
-        } catch (err) { console.error("Socket Error:", err); }
+          else if (data.type === 'ping') {
+            // Internal heartbeat to keep socket alive on mobile/Render
+            socket.send(JSON.stringify({ type: 'pong' }));
+          }
+        } catch (err) { console.error("Socket Logic Error:", err); }
       };
 
-      socket.onclose = (e) => {
-        if (matchEndedRef.current || e.code === 1000) return; 
-        setGameState(current => {
-          if (current === 'gameover') return current; 
-          if (onQuit) onQuit(); 
-          return current;
-        });
-      };
+      if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: "CLIENT_READY" }));
+      } else {
+          socket.onopen = () => socket.send(JSON.stringify({ type: "CLIENT_READY" }));
+      }
 
       socket.addEventListener('message', handleSocketMessage);
       return () => {
         socket.removeEventListener('message', handleSocketMessage);
-        if (readyInterval) clearInterval(readyInterval);
       };
     }
-  }, [mode, socket, onQuit, startGame, clearAllTimers, onRequeue, playSound, audioRefs]);
+  }, [mode, socket, onQuit, startGame, clearAllTimers, playSound, audioRefs]);
 
-  // ... (Remainder of effects are unchanged) ...
+  // --- SECONDARY EFFECTS ---
   useEffect(() => {
       if (gameState === 'showing' && !isPaused) {
         const revealTime = Math.max(3000 - (round - 1) * 300, 1000);
         hideTimerRef.current = setTimeout(() => {
+          if (matchEndedRef.current) return;
           setGameState('playing');
           const realDuration = Math.max(10000 - ((round - 1) * 500), 2000); 
           startTimer(realDuration);

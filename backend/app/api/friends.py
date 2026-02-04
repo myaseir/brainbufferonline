@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from app.core.config import settings
 from app.repositories.friend_repo import FriendRepository
-from app.db.redis import redis_client
+# from app.db.redis import redis_client # ❌ Removed: Logic moved to Repo
 
 router = APIRouter()
 
@@ -35,16 +35,12 @@ async def accept_friend_request(request_id: str, user_id: str = Depends(get_curr
 
 @router.get("/list")
 async def list_friends(user_id: str = Depends(get_current_user)):
+    """
+    ✅ UPDATED: Just call the repo. 
+    The repo now handles fetching profiles AND live status from Redis automatically.
+    """
     repo = FriendRepository()
-    friends = await repo.get_friends(user_id)
-    
-    # Check Real-Time Online Status
-    for friend in friends:
-        # 🔥 FIX: Removed 'await' here because your Redis client is synchronous
-        is_online = redis_client.get(f"presence:{friend['id']}")
-        friend["is_online"] = True if is_online else False
-        
-    return friends
+    return await repo.get_friends(user_id)
 
 @router.get("/requests")
 async def list_requests(user_id: str = Depends(get_current_user)):
@@ -55,16 +51,9 @@ async def list_requests(user_id: str = Depends(get_current_user)):
 async def search_people(q: str, user_id: str = Depends(get_current_user)):
     repo = FriendRepository()
     return await repo.search_users(q, user_id)
+
 @router.post("/decline/{request_id}")
 async def decline_friend_request(request_id: str, user_id: str = Depends(get_current_user)):
     repo = FriendRepository()
-    # Assuming you have a delete method. If not, you might need to add it to friend_repo.py
-    # If using pure SQL in repo, it would look like: 
-    # await database.execute("DELETE FROM friend_requests WHERE id = :id AND receiver_id = :uid", {"id": request_id, "uid": user_id})
-    
-    # Simple workaround if you don't want to edit repo:
-    # return await repo.reject_request(request_id, user_id) 
-    
-    # Or assuming you updated the repo:
-    await repo.decline_request(request_id, user_id)
-    return {"success": True}
+    success = await repo.decline_request(request_id, user_id)
+    return {"success": success}
