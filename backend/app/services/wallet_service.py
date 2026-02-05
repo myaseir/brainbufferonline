@@ -86,3 +86,30 @@ class WalletService:
         """
         await self.user_repo.update_wallet(user_id, amount)
         return True
+    
+    async def claim_referral_bonus(self, current_user: dict, code: str):
+        # 1. Self-referral check
+        if current_user.get("referral_code") == code.upper():
+            return {"success": False, "error": "Self-referral is not allowed."}
+
+        # 2. Already referred check
+        if current_user.get("referred_by"):
+            return {"success": False, "error": "You have already claimed a referral bonus."}
+
+        # 3. Find the Giver (the person who owns the code)
+        giver = await self.user_repo.get_by_referral_code(code)
+        if not giver:
+            return {"success": False, "error": "Invalid referral code."}
+
+        # 4. Process the transaction via Repository
+        # Note: We give 200 PKR to BOTH as you requested
+        success = await self.user_repo.apply_referral_bonus(
+            downloader_id=str(current_user["_id"]),
+            giver_id=str(giver["_id"]),
+            amount=200.0
+        )
+
+        if success:
+            return {"success": True, "message": "200 PKR added to both accounts!"}
+        
+        return {"success": False, "error": "Transaction failed. Please try again."}

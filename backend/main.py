@@ -8,7 +8,7 @@ from app.core.config import settings
 import logging
 import os
 from app.api import support
-
+from app.api import system
 # --- 📝 LOGGING SETUP ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("uvicorn.error")
@@ -81,7 +81,7 @@ app.include_router(wallet.router, prefix="/api/wallet", tags=["Wallet"])
 app.include_router(game_ws.router, prefix="/api/game", tags=["Game"])
 app.include_router(leaderboard.router, prefix="/api/leaderboard", tags=["Leaderboard"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
-
+app.include_router(system.router, prefix="/api/system", tags=["System"])
 # ✅ NEW ROUTERS ADDED HERE
 app.include_router(friends.router, prefix="/api/friends", tags=["Friends"])
 app.include_router(lobby.router, tags=["Lobby"]) # Handles /ws/lobby

@@ -132,22 +132,24 @@ async def signup_verify(data: VerifyRequest):
     return {"msg": "Account verified successfully", "user_id": str(user_id)}
 
 @router.get("/me")
+@router.get("/me")
 async def get_current_user_details(user: dict = Depends(get_current_user)):
     """
-    Returns the full profile including the recent_matches array.
+    Returns the full profile including referral data.
     """
-    # 🚀 CRITICAL UPDATE: Add recent_matches so the dashboard can see them
     return {
         "username": user.get("username"),
         "email": user.get("email"),
-        "wallet_balance": round(user.get("wallet_balance", 0), 2), # 💰 Precision Fix
-        "user_id": str(user.get("_id") or user.get("id")), # Ensure ID is a string
+        "wallet_balance": round(user.get("wallet_balance", 0), 2),
+        "user_id": str(user.get("_id") or user.get("id")),
         "total_wins": user.get("total_wins", 0),
         "total_matches": user.get("total_matches", 0),
         "rank": user.get("rank", "Elite"),
-        "recent_matches": user.get("recent_matches", []) # ✅ Added this line
+        "recent_matches": user.get("recent_matches", []),
+        # --- 🚀 ADD THESE TWO LINES ---
+        "referral_code": user.get("referral_code"), 
+        "referred_by": user.get("referred_by")
     }
-
 @router.post("/login")
 async def login(data: LoginRequest):
     user = await auth_service.validate_user(data.email, data.password)

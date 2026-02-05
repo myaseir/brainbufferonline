@@ -1,5 +1,6 @@
 import { Inter } from 'next/font/google';
 import './globals.css';
+import UpdateGuard from './components/UpdateGuard'; // 🚀 Import the guard
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -20,18 +21,18 @@ export const viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
-  userScalable: false, // ✅ Good: Prevents annoying zoom on mobile inputs
-  themeColor: '#3b82f6', // ✅ Better: Match your "Buffer" blue
+  userScalable: false, 
+  themeColor: '#3b82f6', 
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      {/* REMOVED bg-white and text-slate-800. 
-          The styles in your globals.css and individual components will now work. 
-      */}
       <body className={`${inter.className} antialiased`}>
-        {children}
+        {/* ✅ The UpdateGuard now protects all routes including Dashboard and Game */}
+        <UpdateGuard>
+          {children}
+        </UpdateGuard>
       </body>
     </html>
   );

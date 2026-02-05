@@ -78,3 +78,20 @@ async def request_withdrawal(data: WithdrawalRequest, current_user: dict = Depen
     finally:
         # Release lock or let it expire
         redis_client.delete(withdraw_lock)
+        
+@router.post("/referral/claim")
+async def claim_bonus(payload: dict, current_user = Depends(get_current_user)):
+    """
+    Exposes the 200 PKR referral reward logic to the frontend.
+    """
+    code = payload.get("code")
+    if not code:
+        raise HTTPException(status_code=400, detail="Referral code is required")
+        
+    wallet_service = WalletService()
+    result = await wallet_service.claim_referral_bonus(current_user, code)
+    
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+        
+    return result

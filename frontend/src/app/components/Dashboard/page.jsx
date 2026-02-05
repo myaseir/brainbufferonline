@@ -8,6 +8,7 @@ import FriendSidebar from './FriendSidebar';
 import LobbyListener from '../LobbyListener';
 import SupportModal from './SupportModal';
 import { useNetworkCheck } from '../../hooks/useNetworkCheck'; 
+import ReferralCard from './ReferralCard';
 
 import { Target, Play, Zap, Crown, Trophy, X, DollarSign, UserCheck, Smartphone, Hash, Banknote, CheckCircle2, Wallet, Lock, Loader2, LifeBuoy, Wifi } from 'lucide-react';
 
@@ -267,6 +268,11 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
               </div>
               <div className="absolute -right-4 -bottom-4 opacity-[0.03] rotate-12 text-slate-900"><Trophy size={160} /></div>
             </div>
+
+   <ReferralCard 
+  user={localUser} 
+  onUpdateUser={refreshUser} 
+/>
 
             <RecentMatches matches={localUser?.recent_matches || []} />
           </div>

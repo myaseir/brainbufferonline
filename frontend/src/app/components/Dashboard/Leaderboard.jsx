@@ -7,21 +7,19 @@ export default function Leaderboard({ players, loading }) {
   const [prevWinner, setPrevWinner] = useState(null);
 
   useEffect(() => {
-  if (!loading && players?.length > 0) {
-    const currentWinner = players[0].username;
-    
-    // Trigger confetti only if the winner actually changed
-    if (prevWinner && prevWinner !== currentWinner) {
-      triggerWinnerConfetti();
+    // ✅ Added optional chaining (players?.length)
+    if (!loading && players?.length > 0) {
+      const currentWinner = players[0].username;
+      
+      if (prevWinner && prevWinner !== currentWinner) {
+        triggerWinnerConfetti();
+      }
+      
+      if (prevWinner !== currentWinner) {
+        setPrevWinner(currentWinner);
+      }
     }
-    
-    // Only update if it's different to avoid unnecessary cycles
-    if (prevWinner !== currentWinner) {
-      setPrevWinner(currentWinner);
-    }
-  }
-  // 🚀 REMOVED 'prevWinner' from dependencies to break the loop
-}, [players, loading]);
+  }, [players, loading]);
 
   const triggerWinnerConfetti = () => {
     const end = Date.now() + 3000;
@@ -104,7 +102,8 @@ export default function Leaderboard({ players, loading }) {
              <p className="text-[10px] font-black uppercase text-slate-500 tracking-[0.2em]">Syncing Shared Brain...</p>
           </div>
         ) : (
-          players.map((player, idx) => (
+          /* ✅ Added Optional Chaining here to prevent crash */
+          players?.map((player, idx) => (
             <div 
               key={idx} 
               className={`flex items-center justify-between p-5 rounded-[2.5rem] border transition-all duration-500 ${
@@ -139,7 +138,6 @@ export default function Leaderboard({ players, loading }) {
               
               <div className="text-right">
                 <div className="flex flex-col">
-                  {/* 🚀 Changed to show Ranking context instead of Balance */}
                   <span className={`text-xl font-black ${idx === 0 ? 'text-cyan-400' : 'text-white'}`}>
                     #{idx + 1}
                   </span>
@@ -150,7 +148,8 @@ export default function Leaderboard({ players, loading }) {
           ))
         )}
 
-        {!loading && players.length === 0 && (
+        {/* ✅ Safety check for length against null/undefined */}
+        {!loading && (!players || players.length === 0) && (
           <div className="text-center py-20">
             <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">No commanders in range</p>
           </div>

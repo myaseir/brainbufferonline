@@ -4,7 +4,8 @@ from app.db.redis import redis_client
 import json
 from datetime import datetime, timezone
 from bson import ObjectId
-
+import random
+import string
 # --- 🚀 CUSTOM ENCODER ---
 class MongoEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -58,6 +59,13 @@ class AuthService:
             
         return user
 
+
+    def _generate_referral_code(self, username: str) -> str:
+        """Creates a code like OWAIS123"""
+        prefix = "".join(filter(str.isalnum, username))[:4].upper()
+        digits = "".join(random.choices(string.digits, k=3))
+        return f"{prefix}{digits}"
+    
     async def register_user(self, username, password, email):
         """
         Hashes password and saves a new user with pre-caching.
@@ -75,6 +83,8 @@ class AuthService:
             "wallet_balance": 50.0,
             "total_wins": 0,
             "role": "user",
+            "referral_code": self._generate_referral_code(username), 
+            "referred_by": None,
             "created_at": datetime.now(timezone.utc)
         }
         

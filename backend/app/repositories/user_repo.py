@@ -34,11 +34,11 @@ class UserRepository:
     async def get_by_username(self, username: str):
         return await self.collection.find_one({"username": username})
 
-    async def create_user(self, user_data: dict):
-        if "recent_matches" not in user_data:
-            user_data["recent_matches"] = []
-        result = await self.collection.insert_one(user_data)
-        return str(result.inserted_id)
+    # async def create_user(self, user_data: dict):
+    #     if "recent_matches" not in user_data:
+    #         user_data["recent_matches"] = []
+    #     result = await self.collection.insert_one(user_data)
+    #     return str(result.inserted_id)
 
     # --- 💰 WALLET & STATS METHODS ---
 
@@ -174,3 +174,69 @@ class UserRepository:
             }},
             session=session
         )
+    
+    # --- 🎁 REFERRAL METHODS ---
+
+    async def get_by_referral_code(self, code: str):
+        """Find a user by their unique sharing code."""
+        # We use .upper() to make the search case-insensitive
+        return await self.collection.find_one({"referral_code": code.upper()})
+
+    async def apply_referral_bonus(self, downloader_id: str, giver_id: str, amount: float = 200.0):
+        """
+        🚀 ATOMIC REFERRAL TRANSACTION
+        Ensures both users get the 200 PKR reward and links the accounts.
+        """
+        try:
+            async with await db.client.start_session() as session:
+                async with session.start_transaction():
+                    # 1. Reward the Giver (The person who shared the code)
+                    await self.collection.update_one(
+                        {"_id": ObjectId(str(giver_id))},
+                        {"$inc": {"wallet_balance": amount}},
+                        session=session
+                    )
+
+                    # 2. Reward the Downloader & Mark them as 'referred'
+                    await self.collection.update_one(
+                        {"_id": ObjectId(str(downloader_id))},
+                        {
+                            "$inc": {"wallet_balance": amount},
+                            "$set": {"referred_by": str(giver_id)}
+                        },
+                        session=session
+                    )
+            
+            # 3. Clean up cache so the UI updates immediately
+            redis_client.delete("stats:total_pool")
+            # If you cache user profiles, delete that key here too:
+            # redis_client.delete(f"user:profile:{downloader_id}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"❌ Referral Transaction Failed: {e}")
+            return False
+        
+    async def create_user(self, user_data: dict):
+        """
+        Finalized create_user: Ensures all necessary fields exist 
+        before inserting into MongoDB.
+        """
+        # Ensure list exists for history
+        if "recent_matches" not in user_data:
+            user_data["recent_matches"] = []
+            
+        # Initialize wallet if not already set by service
+        if "wallet_balance" not in user_data:
+            user_data["wallet_balance"] = 0.0
+            
+        # Initialize referral tracking
+        if "referred_by" not in user_data:
+            user_data["referred_by"] = None 
+            
+        # IMPORTANT: We do NOT set this to None if it already exists
+        if "referral_code" not in user_data:
+            user_data["referral_code"] = None 
+
+        result = await self.collection.insert_one(user_data)
+        return str(result.inserted_id)
