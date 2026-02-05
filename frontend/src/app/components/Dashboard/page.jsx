@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Navbar from './Navbar';
 import { toast } from 'react-hot-toast';
 import Leaderboard from './Leaderboard';
@@ -10,7 +10,11 @@ import SupportModal from './SupportModal';
 import { useNetworkCheck } from '../../hooks/useNetworkCheck'; 
 import ReferralCard from './ReferralCard';
 
-import { Target, Play, Zap, Crown, Trophy, X, DollarSign, UserCheck, Smartphone, Hash, Banknote, CheckCircle2, Wallet, Lock, Loader2, LifeBuoy, Wifi } from 'lucide-react';
+import { 
+  Target, Play, Zap, Crown, Trophy, X, DollarSign, UserCheck, 
+  Smartphone, Hash, Banknote, CheckCircle2, Wallet, Lock, 
+  Loader2, LifeBuoy 
+} from 'lucide-react';
 
 export default function DashboardPage({ user, onStartGame, onStartOffline, onLogout, onJoinChallenge }) {
   const [stats, setStats] = useState({ top_players: [], global_stats: { total_pool: 0 } });
@@ -30,43 +34,15 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
   const [showSupport, setShowSupport] = useState(false);
 
   // 📡 Network Check
-  // ✅ FIX: Added measureStability to the destructuring here
   const { checkPing, latency, measureStability } = useNetworkCheck();
   const [isCheckingNet, setIsCheckingNet] = useState(false);
 
   // User State
   const [localUser, setLocalUser] = useState(user);
 
-  useEffect(() => {
-    fetchStats();
-    checkPing(); 
-    const interval = setInterval(fetchStats, 30000);
-    return () => clearInterval(interval);
-  }, [checkPing]); 
+  // --- 🔄 REFRESH & FETCH LOGIC ---
 
-  useEffect(() => {
-    if (user) {
-      setLocalUser(user);
-    }
-  }, [user]);
-
-  const currentBalance = localUser?.wallet_balance || 0;
-  const canPlayRanked = currentBalance >= 50;
-
-  // 🎨 HELPER: Get Color based on Ping
-  const getPingColor = () => {
-    if (!latency) return "text-slate-300"; // No data yet
-    if (latency < 150) return "text-emerald-500"; // Excellent
-    if (latency < 300) return "text-amber-500";   // Okay
-    return "text-red-500";                        // Bad
-  };
-
-  const getPingText = () => {
-     if (!latency) return "Checking...";
-     return `${latency}ms`;
-  };
-
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/leaderboard/stats`);
       const data = await res.json();
@@ -76,43 +52,80 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
     } finally { 
       setLoading(false); 
     }
-  };
+  }, []);
 
-  const refreshUser = async () => {
+  const fetchUserData = useCallback(async () => {
     const token = localStorage.getItem('token');
-    if (!token) return;
+    if (!token) return null;
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
-        const data = await res.json();
-        setLocalUser(data);
+        return await res.json();
       }
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error("User fetch failed", err);
+    }
+    return null;
+  }, []);
+
+  const handleDataUpdate = async () => {
+    // Re-fetch both user data AND global stats
+    const [updatedUser] = await Promise.all([
+      fetchUserData(),
+      fetchStats()
+    ]);
+
+    if (updatedUser) {
+      setLocalUser(updatedUser);
+      toast.success("Dashboard Updated", {
+        style: {
+          borderRadius: '12px',
+          background: '#0f172a',
+          color: '#fff',
+          fontSize: '10px',
+          fontWeight: 'bold',
+          textTransform: 'uppercase'
+        }
+      });
+    }
   };
 
-  // ✅ UPDATED: Strict Stability Check Logic
+  useEffect(() => {
+    fetchStats();
+    checkPing(); 
+    // Auto-refresh stats and user data every 30 seconds
+    const interval = setInterval(() => {
+        fetchStats();
+        fetchUserData().then(data => data && setLocalUser(data));
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [checkPing, fetchStats, fetchUserData]); 
+
+  useEffect(() => {
+    if (user) {
+      setLocalUser(user);
+    }
+  }, [user]);
+
+  // --- ⚔️ GAMEPLAY LOGIC ---
+
+  const currentBalance = localUser?.wallet_balance || 0;
+  const canPlayRanked = currentBalance >= 50;
+
   const handleRankedSearch = async () => {
     if (!canPlayRanked) {
         toast.error("Insufficient balance! You need 50 PKR to play.", { icon: '💰' });
         return;
     }
-    
-    // 1. Start Analysis (Stress Test)
     setIsCheckingNet(true);
-    
-    // 🛡️ This runs the 5-sample stress test
     const result = await measureStability(); 
-    
     setIsCheckingNet(false);
 
-    // 2. Decide Flow based on Stress Test
     if (result.passed) {
-        // toast.success(`Connection Stable (${result.avg}ms). Entering Queue...`, { icon: '🚀' });
         onStartGame(); 
     } else {
-        // Show specific error based on why it failed
         if (result.spikes > 0) {
             toast.error(`Network Unstable! Detected ${result.spikes} lag spikes.`, { icon: '📉' });
         } else {
@@ -120,6 +133,8 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
         }
     }
   };
+
+  // --- 💰 WALLET LOGIC ---
 
   const handleDeposit = async (e) => {
     e.preventDefault();
@@ -144,7 +159,7 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
         setTimeout(() => setShowSuccessToast(false), 5000);
       } else {
         const errorData = await res.json();
-        alert(errorData.detail || "Submission failed. Please check your TRX ID.");
+        alert(errorData.detail || "Submission failed.");
       }
     } catch (err) { alert("Backend error."); } finally { setIsSubmitting(false); }
   };
@@ -170,7 +185,7 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
       if (res.ok) {
         alert("Withdrawal request sent!");
         setShowWithdrawModal(false);
-        refreshUser();
+        handleDataUpdate(); // Soft refresh wallet balance
       } else { alert("Withdrawal failed."); }
     } catch (err) { alert("Error connecting to server"); } finally { setIsSubmitting(false); }
   };
@@ -201,20 +216,15 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
           onLogout={onLogout}
           onOpenFriends={() => setShowFriends(true)}
           requestCount={requestCount}
+          onRefresh={handleDataUpdate}
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <div className="lg:col-span-4 space-y-8">
             <div className="bg-white/90 backdrop-blur-xl border border-white rounded-[2.5rem] p-8 space-y-6 shadow-xl shadow-green-900/5">
-              
-              {/* ✅ HEADER WITH PING INDICATOR */}
-              <div className="flex items-center justify-between mb-2">
-                 <div className="flex items-center gap-3">
-                   <Target className="text-green-500" size={20} />
-                   <h2 className="text-sm font-black uppercase tracking-[0.3em] text-slate-400">Battle Selection</h2>
-                 </div>
-                 
-                 
+              <div className="flex items-center gap-3">
+                <Target className="text-green-500" size={20} />
+                <h2 className="text-sm font-black uppercase tracking-[0.3em] text-slate-400">Battle Selection</h2>
               </div>
               
               <button 
@@ -229,23 +239,22 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
               >
                 <div className="relative z-10 flex flex-col items-center gap-3">
                   {isCheckingNet ? (
-                    <Loader2 className="animate-spin text-slate-400" size={32} />
+                    <Loader2 className="animate-spin text-white" size={32} />
                   ) : (
                     canPlayRanked ? <Play className="fill-white text-white" size={32} /> : <Lock size={32} className="text-slate-400"/>
                   )}
-                  
                   <div className="text-center">
                     <span className={`block text-xl font-black uppercase tracking-tighter ${canPlayRanked && !isCheckingNet ? "text-white" : "text-slate-400"}`}>
-                        {isCheckingNet ? "Checking Network..." : (canPlayRanked ? "Ranked Match" : "Locked")}
+                        {isCheckingNet ? "Network Check..." : (canPlayRanked ? "Ranked Match" : "Locked")}
                     </span>
                     <span className={`text-[10px] font-bold uppercase tracking-widest ${canPlayRanked && !isCheckingNet ? "text-white opacity-90" : "text-slate-400"}`}>
-                        {isCheckingNet ? "Testing Stability..." : "Entry 50 PKR"}
+                        {isCheckingNet ? "Analyzing Ping..." : "Entry 50 PKR"}
                     </span>
                   </div>
                 </div>
               </button>
 
-              <button onClick={onStartOffline} disabled={isCheckingNet} className="w-full bg-white hover:bg-slate-50 border border-slate-100 p-6 rounded-3xl transition-all flex items-center justify-between group shadow-sm disabled:opacity-50">
+              <button onClick={onStartOffline} disabled={isCheckingNet} className="w-full bg-white hover:bg-slate-50 border border-slate-100 p-6 rounded-3xl transition-all flex items-center justify-between group shadow-sm">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-green-50 rounded-2xl flex items-center justify-center text-green-400"><Zap size={24} /></div>
                   <div className="text-left">
@@ -269,11 +278,7 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
               <div className="absolute -right-4 -bottom-4 opacity-[0.03] rotate-12 text-slate-900"><Trophy size={160} /></div>
             </div>
 
-   <ReferralCard 
-  user={localUser} 
-  onUpdateUser={refreshUser} 
-/>
-
+            <ReferralCard user={localUser} onUpdateUser={handleDataUpdate} />
             <RecentMatches matches={localUser?.recent_matches || []} />
           </div>
 
@@ -283,7 +288,7 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
         </div>
       </div>
 
-      {/* --- MODALS (Unchanged) --- */}
+      {/* --- MODALS --- */}
       {showDepositModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
           <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
@@ -294,26 +299,14 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
             </div>
             <div className="bg-slate-900 text-white p-5 rounded-3xl mb-6">
               <p className="text-[10px] font-bold text-slate-400 uppercase mb-2 tracking-widest">Bank Al Habib</p>
-              <p className="text-lg font-black tracking-widest break-all">02910048003531010</p>
+              <p className="text-lg font-black tracking-widest break-all text-emerald-400">02910048003531010</p>
               <p className="text-[10px] font-black text-emerald-500 uppercase mt-1">Muhammad Yasir</p>
             </div>
             <form onSubmit={handleDeposit} className="space-y-4">
-              <div className="relative">
-                <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-                <input type="number" min="1" required placeholder="Amount" value={depositData.amount} onChange={(e) => setDepositData({...depositData, amount: e.target.value})} className="w-full bg-slate-50 border-none pl-12 p-4 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-400 outline-none" />
-              </div>
-              <div className="relative">
-                <UserCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-                <input type="text" required placeholder="Account Name" value={depositData.fullName} onChange={(e) => setDepositData({...depositData, fullName: e.target.value})} className="w-full bg-slate-50 border-none pl-12 p-4 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-400 outline-none" />
-              </div>
-              <div className="relative">
-                <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-                <input type="text" required placeholder="Phone Number" value={depositData.senderNumber} onChange={(e) => setDepositData({...depositData, senderNumber: e.target.value})} className="w-full bg-slate-50 border-none pl-12 p-4 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-emerald-400 outline-none" />
-              </div>
-              <div className="relative">
-                <Hash className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-                <input type="text" required placeholder="TRX ID" value={depositData.trxId} onChange={(e) => setDepositData({...depositData, trxId: e.target.value})} className="w-full bg-slate-50 border-none pl-12 p-4 rounded-2xl text-sm font-black focus:ring-2 focus:ring-emerald-400 outline-none" />
-              </div>
+              <input type="number" min="1" required placeholder="Amount" value={depositData.amount} onChange={(e) => setDepositData({...depositData, amount: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold outline-none" />
+              <input type="text" required placeholder="Account Name" value={depositData.fullName} onChange={(e) => setDepositData({...depositData, fullName: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold outline-none" />
+              <input type="text" required placeholder="Phone Number" value={depositData.senderNumber} onChange={(e) => setDepositData({...depositData, senderNumber: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold outline-none" />
+              <input type="text" required placeholder="TRX ID" value={depositData.trxId} onChange={(e) => setDepositData({...depositData, trxId: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-black outline-none" />
               <button type="submit" disabled={isSubmitting} className="w-full bg-emerald-500 text-white p-5 rounded-3xl font-black uppercase text-xs hover:bg-emerald-600 disabled:opacity-50 transition-all">{isSubmitting ? "Submitting..." : "Confirm Deposit"}</button>
             </form>
           </div>
@@ -323,20 +316,20 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
       {showWithdrawModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
           <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl relative">
-            <button onClick={() => setShowWithdrawModal(false)} className="absolute top-6 right-6 p-2 bg-slate-50 rounded-xl text-slate-400 hover:text-red-500"><X size={20} /></button>
+            <button onClick={() => setShowWithdrawModal(false)} className="absolute top-6 right-6 p-2 bg-slate-50 rounded-xl text-slate-400"><X size={20} /></button>
             <div className="flex items-center gap-4 mb-8">
               <div className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center"><Wallet size={24} /></div>
               <h2 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Withdrawal</h2>
             </div>
             <form onSubmit={handleWithdraw} className="space-y-4">
-              <input type="number" min="1" required placeholder="Amount (PKR)" value={withdrawData.amount} onChange={(e) => setWithdrawData({...withdrawData, amount: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-green-400 outline-none" />
+              <input type="number" min="1" required placeholder="Amount (PKR)" value={withdrawData.amount} onChange={(e) => setWithdrawData({...withdrawData, amount: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold outline-none" />
               <div className="grid grid-cols-2 gap-4">
                 {["Easypaisa", "JazzCash"].map((m) => (
                   <button key={m} type="button" onClick={() => setWithdrawData({...withdrawData, method: m})} className={`p-4 rounded-2xl text-[10px] font-black uppercase border-2 transition-all ${withdrawData.method === m ? "border-emerald-500 bg-emerald-50 text-emerald-600" : "border-slate-50 text-slate-300"}`}>{m}</button>
                 ))}
               </div>
-              <input type="text" required placeholder="Account Number" value={withdrawData.accountNumber} onChange={(e) => setWithdrawData({...withdrawData, accountNumber: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-green-400 outline-none" />
-              <input type="text" required placeholder="Account Title" value={withdrawData.accountName} onChange={(e) => setWithdrawData({...withdrawData, accountName: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-green-400 outline-none" />
+              <input type="text" required placeholder="Account Number" value={withdrawData.accountNumber} onChange={(e) => setWithdrawData({...withdrawData, accountNumber: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold outline-none" />
+              <input type="text" required placeholder="Account Title" value={withdrawData.accountName} onChange={(e) => setWithdrawData({...withdrawData, accountName: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold outline-none" />
               <button type="submit" disabled={isSubmitting} className="w-full bg-slate-900 text-white p-5 rounded-3xl font-black uppercase text-xs hover:bg-emerald-600 disabled:opacity-50 transition-all">{isSubmitting ? "Processing..." : "Confirm Withdrawal"}</button>
             </form>
           </div>
@@ -351,7 +344,6 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
       >
         <LifeBuoy size={24} className="group-hover:animate-spin" />
       </button>
-
     </div>
   );
 }

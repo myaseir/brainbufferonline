@@ -11,6 +11,9 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
   const [searchResults, setSearchResults] = useState([]);
   const [loading, setLoading] = useState(true);
   
+  // 🛡️ State to prevent spamming challenges
+  const [challengingId, setChallengingId] = useState(null);
+  
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
   // --- 📋 DATA FETCHING ---
@@ -24,13 +27,11 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
       const data = await res.json();
       
       if (Array.isArray(data)) {
-        // 1. Map the data to include is_online
         const mapped = data.map(f => ({
             ...f,
             is_online: f.status === 'online'
         }));
 
-        // 2. 🔥 SORT: Online players first, then Offline players
         const sorted = mapped.sort((a, b) => {
             if (a.is_online === b.is_online) return 0;
             return a.is_online ? -1 : 1;
@@ -40,8 +41,6 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
       }
     } catch (err) { console.error(err); }
   };
-
-  // ... (fetchRequests, handleSearch, sendFriendRequest, handleChallenge remain the same)
 
   const fetchRequests = async () => {
     try {
@@ -55,6 +54,26 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
         if (onRequestCountChange) onRequestCountChange(data.length);
       }
     } catch (err) { console.error(err); }
+  };
+
+  // --- ⚔️ CHALLENGE LOGIC ---
+  const handleBattleClick = (friendId, username) => {
+    // Prevent multiple clicks
+    if (challengingId === friendId) return;
+
+    setChallengingId(friendId);
+    
+    if (window.sendChallenge) {
+        window.sendChallenge(friendId, username);
+        toast.success("Battle Request Sent!");
+    } else {
+        toast.error("Battle system offline");
+        setChallengingId(null);
+        return;
+    }
+
+    // Cooldown: Allow retrying after 10 seconds if no response
+    setTimeout(() => setChallengingId(null), 10000);
   };
 
   const sendFriendRequest = async (username) => {
@@ -74,24 +93,40 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
   };
 
   const acceptRequest = async (reqId) => {
+    // 🛡️ Immediate UI feedback to prevent double-click deduction
     const token = localStorage.getItem('token');
-    await fetch(`${API_URL}/api/friends/accept/${reqId}`, { 
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
-    toast.success("Friend Added!");
-    fetchRequests(); 
-    fetchFriends();   
+    
+    // Remove from UI immediately so it can't be clicked again
+    setRequests(prev => prev.filter(r => r.request_id !== reqId));
+    
+    try {
+        const res = await fetch(`${API_URL}/api/friends/accept/${reqId}`, { 
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if(res.ok) {
+            toast.success("Friend Added!");
+            fetchFriends();
+        } else {
+            // If failed, fetch again to restore the request to the list
+            fetchRequests();
+            toast.error("Failed to accept");
+        }
+    } catch (err) {
+        fetchRequests();
+    }
   };
 
   const declineRequest = async (reqId) => {
     const token = localStorage.getItem('token');
     setRequests(prev => prev.filter(r => r.request_id !== reqId));
-    toast("Request Declined", { icon: '🗑️' });
+    
     await fetch(`${API_URL}/api/friends/decline/${reqId}`, { 
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
     });
+    toast("Request Declined", { icon: '🗑️' });
     fetchRequests(); 
   };
 
@@ -111,7 +146,6 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
     return () => clearInterval(interval);
   }, [isOpen]);
 
-  // Debounced Search Effect
   useEffect(() => {
     const delayDebounceFn = setTimeout(async () => {
       if (searchQuery.length > 1) {
@@ -146,7 +180,7 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
           </button>
         </div>
 
-        {/* 🔍 SEARCH BOX (Full Width Fixed) */}
+        {/* 🔍 SEARCH BOX */}
         <div className="px-4 py-4 border-b border-slate-50">
           <div className="flex items-center w-full bg-slate-50 border border-slate-200 rounded-xl px-3 focus-within:ring-2 focus-within:ring-emerald-500/20 focus-within:border-emerald-500 transition-all">
             <Search className="text-slate-400 shrink-0" size={18} />
@@ -188,7 +222,7 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
           {loading ? (
             <div className="flex flex-col items-center justify-center h-64 space-y-4">
               <Loader2 className="text-emerald-500 animate-spin w-10 h-10" />
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse tracking-widest">Syncing Hub...</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse">Syncing Hub...</p>
             </div>
           ) : activeTab === 'friends' ? (
             friends.length === 0 ? <div className="text-center mt-10 text-slate-400 text-sm italic">No friends yet.</div> :
@@ -205,8 +239,20 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
                         </div>
                     </div>
                     {f.is_online && (
-                        <button onClick={() => window.sendChallenge?.(f.id, currentUser?.username)} className="flex items-center gap-1.5 bg-slate-900 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase hover:bg-emerald-500 transition-all active:scale-95">
-                            <Zap size={12} /> Battle
+                        <button 
+                            disabled={challengingId === f.id}
+                            onClick={() => handleBattleClick(f.id, currentUser?.username)} 
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all active:scale-95 ${
+                                challengingId === f.id 
+                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
+                                : 'bg-slate-900 text-white hover:bg-emerald-500'
+                            }`}
+                        >
+                            {challengingId === f.id ? (
+                                <><Check size={12} /> Sent</>
+                            ) : (
+                                <><Zap size={12} /> Battle</>
+                            )}
                         </button>
                     )}
                 </div>
@@ -219,8 +265,18 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
                         <span className="text-sm font-bold text-slate-700">{req.username}</span>
                     </div>
                     <div className="flex gap-2">
-                        <button onClick={() => acceptRequest(req.request_id)} className="p-2 bg-emerald-100 text-emerald-600 rounded-lg hover:bg-emerald-200"><Check size={16}/></button>
-                        <button onClick={() => declineRequest(req.request_id)} className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200"><X size={16}/></button>
+                        <button 
+                            onClick={() => acceptRequest(req.request_id)} 
+                            className="p-2 bg-emerald-100 text-emerald-600 rounded-lg hover:bg-emerald-200"
+                        >
+                            <Check size={16}/>
+                        </button>
+                        <button 
+                            onClick={() => declineRequest(req.request_id)} 
+                            className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200"
+                        >
+                            <X size={16}/>
+                        </button>
                     </div>
                 </div>
             ))
@@ -229,6 +285,6 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
       </div>
     </>
   );
-};
+}
 
 export default FriendSidebar;

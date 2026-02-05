@@ -1,10 +1,11 @@
 "use client";
-import { useEffect } from 'react';
-import { User, PlusCircle, ArrowUpRight, LogOut, Users, Wifi, AlertTriangle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { User, PlusCircle, ArrowUpRight, LogOut, Users, Wifi, AlertTriangle, RefreshCcw } from 'lucide-react';
 import { useNetworkCheck } from '../../hooks/useNetworkCheck';
 
-export default function Navbar({ user, onDeposit, onWithdraw, onLogout, onOpenFriends, requestCount }) {
+export default function Navbar({ user, onDeposit, onWithdraw, onLogout, onOpenFriends, requestCount, onRefresh }) {
   const { checkPing, latency } = useNetworkCheck();
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     checkPing(); 
@@ -14,6 +15,14 @@ export default function Navbar({ user, onDeposit, onWithdraw, onLogout, onOpenFr
 
     return () => clearInterval(interval);
   }, [checkPing]);
+
+  const handleManualRefresh = async () => {
+    if (!onRefresh) return;
+    setIsRefreshing(true);
+    await onRefresh();
+    // Keep spinning for at least 600ms so it looks professional
+    setTimeout(() => setIsRefreshing(false), 600);
+  };
 
   const getPingColor = () => {
     if (!latency) return "text-slate-400 border-slate-100 bg-slate-50";
@@ -35,24 +44,32 @@ export default function Navbar({ user, onDeposit, onWithdraw, onLogout, onOpenFr
         </div>
         
         <div className="text-left relative">
-          <h1 className="text-xl md:text-2xl font-black tracking-tight text-slate-900 uppercase truncate">
-            {user?.username || 'Commander'}
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl md:text-2xl font-black tracking-tight text-slate-900 uppercase truncate">
+              {user?.username || 'Commander'}
+            </h1>
+            
+            {/* 🔥 REFRESH BUTTON */}
+            <button 
+              onClick={handleManualRefresh}
+              className={`p-1.5 hover:bg-slate-100 rounded-full transition-all duration-500 ${isRefreshing ? 'rotate-180 text-emerald-500' : 'text-slate-400'}`}
+              title="Refresh Dashboard"
+            >
+              <RefreshCcw size={16} className={isRefreshing ? 'animate-spin' : ''} />
+            </button>
+          </div>
           
           <div className="flex items-center gap-2 mt-1">
             <span className="bg-green-50 text-green-600 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border border-green-100 shrink-0">Rank: Elite</span>
             
             <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-all duration-500 ${getPingColor()}`}>
-               <Wifi size={10} strokeWidth={3} />
-               <span className="text-[10px] font-bold uppercase tracking-wider tabular-nums">
-                 {latency ? `${latency}ms` : '...'}
-               </span>
+                <Wifi size={10} strokeWidth={3} />
+                <span className="text-[10px] font-bold uppercase tracking-wider tabular-nums">
+                  {latency ? `${latency}ms` : '...'}
+                </span>
             </div>
-
-            <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest truncate hidden lg:block">• PK Server</span>
           </div>
 
-          {/* 🚨 MOBILE-SAFE ALERT (Absolute positioning prevents layout shift) */}
           {latency > 200 && (
             <div className="absolute -bottom-5 left-0 flex items-center gap-1 animate-pulse whitespace-nowrap z-10">
               <AlertTriangle size={10} className="text-red-600" />

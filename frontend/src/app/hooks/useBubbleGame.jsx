@@ -376,6 +376,21 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
             // Internal heartbeat to keep socket alive on mobile/Render
             socket.send(JSON.stringify({ type: 'pong' }));
           }
+          else if (data.type === 'MATCH_CANCELLED' || (data.type === 'ERROR' && data.is_fatal)) {
+    console.log("⚠️ MATCH FAILED TO INITIALIZE");
+    matchEndedRef.current = true;
+    clearAllTimers();
+    
+    // Reset status and show the reason
+    setConnectionStatus('Match Aborted');
+    setResultMessage(data.reason || "Opponent failed to connect. Funds refunded.");
+    
+    // Kick the user to the gameover screen so they aren't stuck on the spinner
+    setGameState('gameover');
+    setWaitingForResult(false);
+    
+    toast.error(data.reason || "Match Initialization Failed", { duration: 5000 });
+}
         } catch (err) { console.error("Socket Logic Error:", err); }
       };
 

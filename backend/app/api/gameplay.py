@@ -70,7 +70,48 @@ async def game_websocket_endpoint(websocket: WebSocket, match_id: str, token: st
             await asyncio.to_thread(redis_client.publish, f"match_init:{match_id}", json.dumps(signal_data))
         
         # Wait for both players to be ready
-        rounds_data, opponent_name, opponent_id = await wait_for_match_ready(match_id, u_id_str)
+        # --- Standard Match Logic ---
+        # ... (Metadata setup and Host init code stays same) ...
+
+        # 🚀 3. THE ARENA INITIALIZATION
+        try:
+            # THIS LINE WAS MISSING: It actually triggers the wait
+            rounds_data, opponent_name, opponent_id = await wait_for_match_ready(match_id, u_id_str)
+        except Exception as e:
+            if "timed out" in str(e).lower():
+                logger.error(f"Match {match_id} timed out. Refunding user {u_id_str}.")
+                
+                # 1. Send the cancellation message to the frontend
+                await websocket.send_json({
+                    "type": "MATCH_CANCELLED",
+                    "reason": "Opponent failed to connect. Your entry fee has been refunded."
+                })
+                
+                # 2. 🔥 TRIGGER REFUND LOGIC
+                from app.services.wallet_service import WalletService
+                wallet_service = WalletService()
+                
+                # Get the bet amount from Redis match metadata
+                bet_raw = await asyncio.to_thread(redis_client.hget, match_key, "bet_amount")
+                # Fallback to 50.0 if not found
+                bet_amount = float(to_str(bet_raw)) if bet_raw else 50.0
+
+                # Call the method from your WalletService class
+                await wallet_service.refund_user(u_id_str, bet_amount)
+                
+                await websocket.close()
+                return
+            raise e # If it's not a timeout, let the main error handler catch it
+
+        # 4. START THE GAME
+        await websocket.send_json({
+            "type": "GAME_START",
+            "rounds": rounds_data,
+            "opponent_name": opponent_name,
+            "match_id": match_id
+        })
+
+        # --- 2. CLIENT LISTENER ... (rest of the file remains the same)
 
         await websocket.send_json({
             "type": "GAME_START",

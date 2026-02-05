@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation'; 
 import { toast } from 'react-hot-toast';
-import { Swords, Check, X } from 'lucide-react'; 
+import { Swords, Check, X, Loader2 } from 'lucide-react'; 
 
 const LobbyListener = ({ onJoinChallenge }) => {
   const router = useRouter();
@@ -10,6 +10,7 @@ const LobbyListener = ({ onJoinChallenge }) => {
   const loadingToastId = useRef(null);
 
   const [incomingChallenge, setIncomingChallenge] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -19,41 +20,39 @@ const LobbyListener = ({ onJoinChallenge }) => {
     const socket = new WebSocket(`${wsUrl}/ws/lobby?token=${token}`);
     socketRef.current = socket;
 
-    socket.onopen = () => {
-      console.log('✅ Connected to Global Lobby');
-    };
-
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
 
-      // Always dismiss loading toast if a response comes back
       if (loadingToastId.current && data.type !== 'ping') {
         toast.dismiss(loadingToastId.current);
         loadingToastId.current = null;
       }
 
       switch (data.type) {
-        // 🔥 NEW: Handle Real-Time Status Changes
-        case 'USER_STATUS_CHANGE':
-          // We dispatch a custom event so the FriendList component can hear it
-          const statusEvent = new CustomEvent('friendStatusUpdate', { 
-            detail: { userId: data.user_id, status: data.status } 
-          });
-          window.dispatchEvent(statusEvent);
-          break;
-
         case 'INCOMING_CHALLENGE':
           setIncomingChallenge({
             challengerId: data.challenger_id,
             challengerName: data.challenger_name,
-            betAmount: data.bet_amount
+            betAmount: data.bet_amount,
+            receivedAt: Date.now()
           });
+          setIsProcessing(false); 
           toast('New Challenge Received!', { icon: '⚔️' });
+          break;
+
+        case 'CHALLENGE_EXPIRED':
+          setIncomingChallenge(prev => {
+            if (prev?.challengerId === data.challenger_id) {
+                return null;
+            }
+            return prev;
+          });
           break;
 
         case 'MATCH_START':
           toast.success('Match Starting! Deducting funds...', { duration: 3000 });
           setIncomingChallenge(null); 
+          setIsProcessing(false);
           
           if (onJoinChallenge) {
             setTimeout(() => onJoinChallenge(data.match_id), 1000);
@@ -62,13 +61,17 @@ const LobbyListener = ({ onJoinChallenge }) => {
           }
           break;
 
+        case 'MATCH_CANCELLED':
+          toast.error(data.reason || "Match cancelled.", { duration: 5000 });
+          setIncomingChallenge(null);
+          setIsProcessing(false);
+          router.push('/dashboard');
+          break;
+
         case 'ERROR':
           toast.error(data.message);
           setIncomingChallenge(null); 
-          break;
-
-        case 'ping':
-          // Respond to heartbeat if necessary (optional)
+          setIsProcessing(false); 
           break;
 
         default:
@@ -76,20 +79,14 @@ const LobbyListener = ({ onJoinChallenge }) => {
       }
     };
 
-    socket.onclose = () => {
-      console.log('❌ Disconnected from Lobby');
-    };
+    socket.onopen = () => console.log('✅ Connected to Global Lobby');
+    socket.onclose = () => console.log('❌ Disconnected from Lobby');
 
-    // Global Send Function
     window.sendChallenge = (targetId, targetName) => {
       if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({
-          type: 'SEND_CHALLENGE',
-          target_id: targetId,
-          username: targetName 
-        }));
+        socket.send(JSON.stringify({ type: 'SEND_CHALLENGE', target_id: targetId, username: targetName }));
       } else {
-        toast.error("Lobby connection lost. Refreshing...");
+        toast.error("Lobby connection lost.");
       }
     };
 
@@ -100,17 +97,17 @@ const LobbyListener = ({ onJoinChallenge }) => {
   }, [router, onJoinChallenge]);
 
   const handleAccept = () => {
-    if (!socketRef.current || !incomingChallenge) return;
-
+    if (!socketRef.current || !incomingChallenge || isProcessing) return;
+    setIsProcessing(true);
     socketRef.current.send(JSON.stringify({
       type: 'ACCEPT_CHALLENGE',
       challenger_id: incomingChallenge.challengerId
     }));
-    
     loadingToastId.current = toast.loading("Verifying wallets...");
   };
 
   const handleDecline = () => {
+    if (isProcessing) return; 
     setIncomingChallenge(null);
     toast("Challenge Declined");
   };
@@ -119,27 +116,57 @@ const LobbyListener = ({ onJoinChallenge }) => {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      {/* Challenge UI stays the same */}
-      <div className="bg-white rounded-2xl shadow-2xl p-6 w-96 border-4 border-emerald-500 relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-2 bg-emerald-500" />
+      <div 
+        key={incomingChallenge.receivedAt} 
+        className="bg-white rounded-2xl shadow-2xl p-6 w-96 border-4 border-emerald-500 relative overflow-hidden"
+      >
+        
+        {/* Progress Bar (Visual indicator of time remaining) */}
+        {!isProcessing && (
+            <div className="absolute top-0 left-0 h-2 bg-red-500 animate-timer-shrink" />
+        )}
+
         <div className="text-center relative z-10">
-          <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4 text-emerald-600 animate-bounce">
-            <Swords size={32} />
+          <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4 text-emerald-600">
+            {isProcessing ? (
+              <Loader2 size={32} className="animate-spin" />
+            ) : (
+              <Swords size={32} className="animate-bounce" />
+            )}
           </div>
-          <h3 className="text-2xl font-black text-slate-800 uppercase italic">Challenge!</h3>
+
+          <h3 className="text-2xl font-black text-slate-800 uppercase italic">
+            {isProcessing ? "Joining..." : "Challenge!"}
+          </h3>
+
           <p className="text-slate-600 mt-2 text-sm font-medium">
             <strong className="text-slate-900">{incomingChallenge.challengerName}</strong> wants to battle you.
           </p>
-          <div className="my-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
+
+          <div className="my-6 bg-slate-50 p-4 rounded-xl border border-slate-200 relative">
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Entry Fee</p>
             <p className="text-3xl font-black text-emerald-600">Rs. {incomingChallenge.betAmount}</p>
           </div>
+
           <div className="flex gap-3">
-            <button onClick={handleDecline} className="flex-1 py-3 rounded-xl border-2 border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-colors flex items-center justify-center gap-2">
+            <button 
+              disabled={isProcessing}
+              onClick={handleDecline} 
+              className={`flex-1 py-3 rounded-xl border-2 border-slate-200 font-bold transition-colors flex items-center justify-center gap-2 
+                ${isProcessing ? 'opacity-50 cursor-not-allowed bg-slate-100' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
               <X size={18} /> Decline
             </button>
-            <button onClick={handleAccept} className="flex-1 py-3 rounded-xl bg-emerald-500 text-white font-bold hover:bg-emerald-600 hover:scale-105 transition-all shadow-lg shadow-emerald-200 flex items-center justify-center gap-2">
-              <Check size={18} /> Accept
+            
+            <button 
+              disabled={isProcessing}
+              onClick={handleAccept} 
+              className={`flex-1 py-3 rounded-xl font-bold transition-all shadow-lg flex items-center justify-center gap-2
+                ${isProcessing 
+                  ? 'bg-emerald-200 text-emerald-500 cursor-not-allowed' 
+                  : 'bg-emerald-500 text-white hover:bg-emerald-600 hover:scale-105 shadow-emerald-200'}`}
+            >
+              {isProcessing ? <>Wait...</> : <><Check size={18} /> Accept</>}
             </button>
           </div>
         </div>

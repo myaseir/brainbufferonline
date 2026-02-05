@@ -29,11 +29,23 @@ const ReferralCard = ({ user, onUpdateUser }) => {
       });
   };
 
-  const shareToWhatsApp = () => {
-    const message = `Join me on BrainBuffer 🧠. Use my code *${user?.referral_code}* to get 200 PKR instantly! 💰`;
-    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
-    window.open(url, '_blank');
-  };
+const shareToWhatsApp = () => {
+  const referralCode = user?.referral_code || "MYCODE";
+  
+  // Structured to highlight the 200 PKR immediately
+  const message = 
+    `🔥 *EARN 200 PKR INSTANTLY!* 💰\n\n` +
+    `I'm using *BrainBuffer* to sharpen my mind and earn real cash. 🧠✨\n\n` +
+    `1️⃣ Download the app below\n` +
+    `2️⃣ Enter my code: *${referralCode}*\n` +
+    `3️⃣ Get *200 PKR* added to your wallet immediately! 🎁\n\n` +
+    `🚀 *Download Link:* \n` +
+    `https://brainbufferonline.vercel.app\n\n` +
+    `_Play. Sharpen. Earn._ 🇵🇰`;
+
+  const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
+  window.open(url, '_blank');
+};
 
   const handleClaim = async () => {
     if (!claimCode) return toast.error("Please enter a referral code");

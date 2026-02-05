@@ -55,14 +55,29 @@ async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
                 target_id = data.get('target_id')
                 challenger_name = data.get('username', 'Unknown')
                 
+                # 1. Send the challenge to the target player
                 sent = await lobby_manager.send_personal_message({
                     "type": "INCOMING_CHALLENGE",
                     "challenger_id": user_id,
                     "challenger_name": challenger_name,
-                    "bet_amount": 50
+                    "bet_amount": 50,
+                    "expires_in": 6 # Syncs with frontend timer
                 }, target_id)
                 
-                if not sent:
+                if sent:
+                    # 🚀 2. Spawn a background task to handle expiry
+                    async def auto_expire_challenge(c_id, t_id):
+                        await asyncio.sleep(6)
+                        expire_msg = {
+                            "type": "CHALLENGE_EXPIRED", 
+                            "challenger_id": c_id
+                        }
+                        # Notify both so the UI disappears for both players
+                        await lobby_manager.send_personal_message(expire_msg, t_id)
+                        await lobby_manager.send_personal_message(expire_msg, c_id)
+                    
+                    asyncio.create_task(auto_expire_challenge(user_id, target_id))
+                else:
                     await websocket.send_json({"type": "ERROR", "message": "User is offline"})
 
             # ==========================================
