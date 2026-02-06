@@ -10,8 +10,8 @@ logger = logging.getLogger("uvicorn.error")
 
 async def wait_for_match_ready(match_id: str, user_id: str, timeout: int = 30):
     """
-    🚀 UPSTASH OPTIMIZED: Uses efficient polling to wait for game rounds.
-    Replaces Pub/Sub to prevent 'Redis object has no attribute pubsub' errors.
+    🚀 UPSTASH OPTIMIZED: Efficient polling for match readiness.
+    Ensures that both players are present in Redis before starting the UI.
     """
     match_key = f"match:live:{match_id}"
     start_time = time.time()
@@ -23,42 +23,41 @@ async def wait_for_match_ready(match_id: str, user_id: str, timeout: int = 30):
         
         rounds_json = match_state.get("rounds")
         
-        # 2. Check if both rounds and opponent details are present
+        # 2. Check for Rounds and Opponent
         if rounds_json:
             opponent_id = None
             opponent_name = "Opponent"
             
-            # Look for the other player's name in the hash
+            # Find the other player's metadata
             for key, value in match_state.items():
                 if key.startswith("name:") and key != f"name:{user_id}":
                     opponent_id = key.split(":")[1]
                     opponent_name = value
                     break
             
-            # Only return if we found the opponent (ensures proper UI start)
+            # Only start the game if the opponent has connected and set their name
             if opponent_id:
+                logger.info(f"Match {match_id} Ready: {user_id} vs {opponent_name}")
                 return json.loads(rounds_json), opponent_name, opponent_id
 
-        # 3. Wait briefly before next poll to stay under Upstash quotas
+        # 3. Adaptive polling: Wait 1s between checks to save Upstash quota
         await asyncio.sleep(1.0)
         
-    raise TimeoutError("Match initialization timed out.")
+    raise TimeoutError("Match initialization timed out waiting for opponent.")
 
 async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_score, op_score, op_name, user_repo):
     """
-    🚀 OPTIMIZED: Uses the centralized process_match_payout for secure transactions.
-    This ensures History, Stats, and Wallet are all updated in one atomic step.
+    🚀 TRANSACTIONAL FINALIZE: Securely handles winner determination and payout.
     """
     match_key = f"match:live:{match_id}"
     lock_key = f"lock:finalizing:{match_id}"
     
-    # 🔒 Atomic Lock: Ensure only one thread/player processes the transaction
+    # 🔒 Atomic Lock for Master Processor
     locked = await asyncio.to_thread(redis_client.set, lock_key, "true", nx=True, ex=30)
     
     if locked:
-        logger.info(f"Finalizing match {match_id}. User {user_id} is Master Processor.")
+        logger.info(f"🏁 Finalizing match {match_id}. Processor: {user_id}")
         
-        # 1. Fetch fresh scores from Redis
         raw_data = await asyncio.to_thread(redis_client.hgetall, match_key)
         match_data = {to_str(k): to_str(v) for k, v in raw_data.items()}
         
@@ -66,7 +65,6 @@ async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_sco
         f_op_score = int(match_data.get(f"score:{opponent_id}", 0))
         my_name = match_data.get(f"name:{user_id}", "You")
 
-        # 2. Determine Winner/Draw status
         is_draw = False
         winner_id = None
         
@@ -89,9 +87,7 @@ async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_sco
             summary_caller = f"Match {status_caller}"
             summary_op = f"Match {status_op}"
 
-        # 3. 💰 CENTRALIZED TRANSACTION (The Fix)
-        # This replaces manual wallet and history calls.
-        # It handles Wallet, Stats, and History internally in a DB Transaction.
+        # 💰 Execute DB Transaction (Wallet + History)
         payout_success = await user_repo.process_match_payout(
             match_id=match_id,
             winner_id=winner_id,
@@ -102,10 +98,7 @@ async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_sco
             is_draw=is_draw
         )
 
-        if not payout_success:
-            logger.error(f"❌ Payout/History failed for match {match_id}")
-
-        # 4. Prepare results for WebSocket broadcast
+        # 4. Results Payload
         results = {
             user_id: {
                 "type": "RESULT",
@@ -125,15 +118,13 @@ async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_sco
             }
         }
 
-        # 5. Atomic State Update in Redis
-        # gameplay.py's monitor loop picks this up within 1 second.
-        pipe = redis_client.pipeline()
-        pipe.hset(match_key, f"status:{user_id}", "FINISHED")
-        pipe.hset(match_key, f"status:{opponent_id}", "FINISHED")
-        pipe.hset(match_key, "finalized", "true")
-        pipe.hset(match_key, f"final_result:{user_id}", json.dumps(results[user_id]))
-        pipe.hset(match_key, f"final_result:{opponent_id}", json.dumps(results[opponent_id]))
-        await asyncio.to_thread(pipe.exec) 
+        # 5. ✅ UPSTASH FIX: Use direct calls instead of pipeline.exec() to avoid crashes
+        # The Upstash SDK handles these high-speed sequential writes very well.
+        redis_client.hset(match_key, f"status:{user_id}", "FINISHED")
+        redis_client.hset(match_key, f"status:{opponent_id}", "FINISHED")
+        redis_client.hset(match_key, "finalized", "true")
+        redis_client.hset(match_key, f"final_result:{user_id}", json.dumps(results[user_id]))
+        redis_client.hset(match_key, f"final_result:{opponent_id}", json.dumps(results[opponent_id]))
         
         return results[user_id]
     

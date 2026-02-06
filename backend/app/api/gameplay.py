@@ -1,6 +1,7 @@
 import json
 import time
 import asyncio
+from typing import Optional
 from fastapi import WebSocket, WebSocketDisconnect, Query
 from app.db.redis import redis_client
 from app.repositories.user_repo import UserRepository
@@ -12,12 +13,18 @@ import logging
 
 logger = logging.getLogger("uvicorn.error")
 
-async def game_websocket_endpoint(websocket: WebSocket, match_id: str, token: str = Query(...)):
+async def game_websocket_endpoint(
+    websocket: WebSocket, 
+    match_id: str, 
+    token: str = Query(...),
+    bot_id: Optional[str] = Query(None) 
+):
     await websocket.accept()
     
-    # 1. Authenticate user
-    user_id = await get_user_from_token(token)
+    # 1. Authenticate user (Supports BOT_ID bypass)
+    user_id = await get_user_from_token(token, bot_id)
     if not user_id: 
+        logger.warning(f"❌ Connection rejected: Invalid Token for match {match_id}")
         await websocket.close()
         return
 
@@ -29,7 +36,6 @@ async def game_websocket_endpoint(websocket: WebSocket, match_id: str, token: st
 
     try:
         # 🚀 2. RECONNECTION KILL-SWITCH
-        # Check if this match is already finished before doing anything else
         raw_data = await asyncio.to_thread(redis_client.hgetall, match_key)
         match_data = {to_str(k): to_str(v) for k, v in raw_data.items()}
 
@@ -42,10 +48,20 @@ async def game_websocket_endpoint(websocket: WebSocket, match_id: str, token: st
                 return
 
         # --- Standard Match Logic ---
+        # ✅ FIX: Fetch user with safety check to prevent crashing if bot isn't in DB yet
         user = await user_repo.get_by_id(u_id_str)
-        username = user.get("username", "Unknown")
         
-        # Metadata Setup
+        if user:
+            username = user.get("username", "Unknown Player")
+        elif u_id_str.startswith("BOT"):
+            # Fallback for Bots not yet seeded in Atlas
+            username = f"Player_{u_id_str.split('_')[-1]}"
+        else:
+            logger.warning(f"❌ User {u_id_str} not found in DB. Closing connection.")
+            await websocket.close()
+            return
+        
+        # Metadata Setup in Redis
         pipe = redis_client.pipeline()
         pipe.hset(match_key, f"name:{u_id_str}", username)
         pipe.hset(match_key, f"status:{u_id_str}", "PLAYING")
@@ -54,7 +70,7 @@ async def game_websocket_endpoint(websocket: WebSocket, match_id: str, token: st
         pipe.hincrby(match_key, "active_conns", 1)
         await asyncio.to_thread(pipe.exec)
 
-        # Host initialization
+        # 🚀 3. HOST INITIALIZATION
         is_host = await asyncio.to_thread(redis_client.set, f"init:{match_id}", "true", nx=True, ex=30)
         
         if is_host:
@@ -69,41 +85,26 @@ async def game_websocket_endpoint(websocket: WebSocket, match_id: str, token: st
             }
             await asyncio.to_thread(redis_client.publish, f"match_init:{match_id}", json.dumps(signal_data))
         
-        # Wait for both players to be ready
-        # --- Standard Match Logic ---
-        # ... (Metadata setup and Host init code stays same) ...
-
-        # 🚀 3. THE ARENA INITIALIZATION
+        # 🚀 4. THE ARENA INITIALIZATION
         try:
-            # THIS LINE WAS MISSING: It actually triggers the wait
             rounds_data, opponent_name, opponent_id = await wait_for_match_ready(match_id, u_id_str)
         except Exception as e:
             if "timed out" in str(e).lower():
                 logger.error(f"Match {match_id} timed out. Refunding user {u_id_str}.")
-                
-                # 1. Send the cancellation message to the frontend
                 await websocket.send_json({
                     "type": "MATCH_CANCELLED",
                     "reason": "Opponent failed to connect. Your entry fee has been refunded."
                 })
-                
-                # 2. 🔥 TRIGGER REFUND LOGIC
                 from app.services.wallet_service import WalletService
                 wallet_service = WalletService()
-                
-                # Get the bet amount from Redis match metadata
                 bet_raw = await asyncio.to_thread(redis_client.hget, match_key, "bet_amount")
-                # Fallback to 50.0 if not found
                 bet_amount = float(to_str(bet_raw)) if bet_raw else 50.0
-
-                # Call the method from your WalletService class
                 await wallet_service.refund_user(u_id_str, bet_amount)
-                
                 await websocket.close()
                 return
-            raise e # If it's not a timeout, let the main error handler catch it
+            raise e
 
-        # 4. START THE GAME
+        # 🚀 5. START THE GAME
         await websocket.send_json({
             "type": "GAME_START",
             "rounds": rounds_data,
@@ -111,31 +112,18 @@ async def game_websocket_endpoint(websocket: WebSocket, match_id: str, token: st
             "match_id": match_id
         })
 
-        # --- 2. CLIENT LISTENER ... (rest of the file remains the same)
-
-        await websocket.send_json({
-            "type": "GAME_START",
-            "rounds": rounds_data,
-            "opponent_name": opponent_name,
-            "match_id": match_id
-        })
-
-        # --- 2. CLIENT LISTENER (Incoming Scores) ---
+        # --- 6. CLIENT LISTENER ---
         async def listen_to_client():
             try:
                 while True:
                     data = await websocket.receive_json()
-                    
-                    # Connection Heartbeat
                     if data.get("type") == "PING":
                         await websocket.send_json({"type": "PONG"})
                         continue
-
                     if data.get("type") == "SCORE_UPDATE":
                         new_score = int(data.get("score", 0))
                         await asyncio.to_thread(redis_client.hset, match_key, f"score:{u_id_str}", new_score)
                         await asyncio.to_thread(redis_client.hset, match_key, f"last_seen:{u_id_str}", time.time())
-
                     if data.get("type") == "GAME_OVER":
                         await asyncio.to_thread(redis_client.hset, match_key, f"status:{u_id_str}", "FINISHED")
             except:
@@ -143,20 +131,20 @@ async def game_websocket_endpoint(websocket: WebSocket, match_id: str, token: st
 
         listen_task = asyncio.create_task(listen_to_client())
 
-        # --- 3. MONITOR LOOP ---
+        # --- 7. MONITOR LOOP ---
         last_sync_score = -1
         last_sync_op_score = -1
 
         while True:
-            await asyncio.sleep(1.0) 
+            await asyncio.sleep(0.5) 
             
             raw_data = await asyncio.to_thread(redis_client.hgetall, match_key)
             match_data = {to_str(k): to_str(v) for k, v in raw_data.items()}
             
-            # Instant Sync check
-            final_res_json = match_data.get(f"final_result:{u_id_str}")
-            if final_res_json:
-                await websocket.send_json({"type": "RESULT", **json.loads(final_res_json)})
+            if match_data.get("finalized") == "true":
+                final_res_json = match_data.get(f"final_result:{u_id_str}")
+                if final_res_json:
+                    await websocket.send_json({"type": "RESULT", **json.loads(final_res_json)})
                 break 
 
             my_score = int(match_data.get(f"score:{u_id_str}", 0))
@@ -171,13 +159,11 @@ async def game_websocket_endpoint(websocket: WebSocket, match_id: str, token: st
                 await finalize_match(websocket, match_id, u_id_str, opponent_id, "OPPONENT_FLED", my_score, op_score, opponent_name, user_repo)
                 continue
 
-            # B. Normal Completion Logic (With Tie-Breaker support)
-            # Both players finished? End it.
+            # B. Normal Completion Logic
             if my_status == "FINISHED" and op_status == "FINISHED":
                 await finalize_match(websocket, match_id, u_id_str, opponent_id, "NORMAL", my_score, op_score, opponent_name, user_repo)
                 continue
             
-            # If one is finished but other has higher score? End it (Winner found).
             elif op_status == "FINISHED" and my_status == "PLAYING" and my_score > op_score:
                 await finalize_match(websocket, match_id, u_id_str, opponent_id, "NORMAL", my_score, op_score, opponent_name, user_repo)
                 continue
@@ -185,9 +171,6 @@ async def game_websocket_endpoint(websocket: WebSocket, match_id: str, token: st
             elif my_status == "FINISHED" and op_status == "PLAYING" and op_score > my_score:
                 await finalize_match(websocket, match_id, u_id_str, opponent_id, "NORMAL", my_score, op_score, opponent_name, user_repo)
                 continue
-
-            # Note: If one is finished and scores are EQUAL, the loop continues 
-            # to let the playing user try to score higher.
 
             # C. Score Syncing
             if my_score != last_sync_score or op_score != last_sync_op_score:
@@ -206,6 +189,10 @@ async def game_websocket_endpoint(websocket: WebSocket, match_id: str, token: st
         await asyncio.to_thread(redis_client.hincrby, match_key, "active_conns", -1)
         if listen_task: 
             listen_task.cancel()
+            try:
+                await listen_task 
+            except asyncio.CancelledError:
+                pass
         try:
             await websocket.close()
         except:

@@ -2,11 +2,27 @@ from app.db.mongodb import db
 from app.db.redis import redis_client
 from bson import ObjectId
 import json
+import logging
 from datetime import datetime, timezone
+
+logger = logging.getLogger("uvicorn.error")
 
 class MatchRepository:
     def __init__(self):
         pass
+
+    # --- 🛡️ SAFETY HELPER ---
+    def _to_id(self, id_val):
+        """
+        Converts to ObjectId only if it's a valid 24-char hex string.
+        Returns the original string if it's a Bot ID (e.g., 'BOT_001').
+        """
+        if not id_val:
+            return None
+        id_str = str(id_val)
+        if ObjectId.is_valid(id_str):
+            return ObjectId(id_str)
+        return id_str
 
     @property
     def collection(self):
@@ -16,10 +32,11 @@ class MatchRepository:
         return db.db.matches 
 
     async def create_match_record(self, match_id: str, p1_id: str, p2_id: str, stake: float):
+        # ✅ FIX: Using _to_id for player IDs to prevent BOT_XXX crashes
         match_doc = {
             "match_id": match_id,
-            "player1_id": ObjectId(p1_id),
-            "player2_id": ObjectId(p2_id),
+            "player1_id": self._to_id(p1_id),
+            "player2_id": self._to_id(p2_id),
             "stake": stake,
             "status": "ongoing",
             "created_at": datetime.now(timezone.utc)
@@ -28,13 +45,13 @@ class MatchRepository:
         return match_id
 
     async def finalize_match(self, match_id: str, winner_id: str, scores: dict):
-        # Ensure scores are JSON serializable
+        # ✅ FIX: Using _to_id for winner_id
         await self.collection.update_one(
             {"match_id": match_id},
             {
                 "$set": {
                     "status": "completed",
-                    "winner_id": ObjectId(winner_id) if winner_id and winner_id != "DRAW" else None,
+                    "winner_id": self._to_id(winner_id) if winner_id and winner_id != "DRAW" else None,
                     "scores": scores,
                     "finished_at": datetime.now(timezone.utc)
                 }
@@ -44,20 +61,13 @@ class MatchRepository:
     # --- 🚀 SCALABLE REDIS MATCHMAKING HELPERS ---
 
     async def push_to_queue(self, user_id: str):
-        """
-        🚀 KEY SYNC: Changed 'matchmaking:pool' to 'matchmaking_pool' 
-        to match your MatchmakingService.
-        """
         redis_client.sadd("matchmaking_pool", str(user_id))
 
     async def pop_match_pair(self):
-        """Atomics pull for two players."""
         players = redis_client.spop("matchmaking_pool", count=2)
-        # Standardize to strings immediately for logic elsewhere
         if players:
             return [p.decode() if isinstance(p, bytes) else str(p) for p in players]
         return None
 
     async def cleanup_queue(self, user_id: str):
-        """Removes a player if they disconnect while waiting."""
         redis_client.srem("matchmaking_pool", str(user_id))

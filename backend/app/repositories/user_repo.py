@@ -10,6 +10,17 @@ class UserRepository:
     def __init__(self):
         pass
 
+    # --- 🛡️ SAFETY HELPER ---
+    def _to_id(self, id_val):
+        """
+        Converts to ObjectId only if it's a valid 24-char hex string.
+        Returns the original string if it's a Bot ID (e.g., 'BOT_001').
+        """
+        id_str = str(id_val)
+        if ObjectId.is_valid(id_str):
+            return ObjectId(id_str)
+        return id_str
+
     @property
     def collection(self):
         if db.db is None:
@@ -24,26 +35,17 @@ class UserRepository:
 
     async def get_by_id(self, user_id: str):
         try:
-            return await self.collection.find_one({"_id": ObjectId(str(user_id))})
-        except Exception:
+            # ✅ FIX: Use _to_id to handle both Humans and Bots
+            return await self.collection.find_one({"_id": self._to_id(user_id)})
+        except Exception as e:
+            logger.error(f"Error in get_by_id: {e}")
             return None
-
-    async def get_by_email(self, email: str):
-        return await self.collection.find_one({"email": email})
-
-    async def get_by_username(self, username: str):
-        return await self.collection.find_one({"username": username})
-
-    # async def create_user(self, user_data: dict):
-    #     if "recent_matches" not in user_data:
-    #         user_data["recent_matches"] = []
-    #     result = await self.collection.insert_one(user_data)
-    #     return str(result.inserted_id)
 
     # --- 💰 WALLET & STATS METHODS ---
 
     async def update_wallet(self, user_id: str, amount: float, session=None):
-        query = {"_id": ObjectId(str(user_id))}
+        # ✅ FIX: Handle Bot/Human ID safely
+        query = {"_id": self._to_id(user_id)}
         if amount < 0:
             query["wallet_balance"] = {"$gte": abs(amount)}
 
@@ -56,13 +58,13 @@ class UserRepository:
         return result.modified_count > 0
 
     async def record_match_stats(self, user_id: str, is_win: bool, session=None):
-        u_id_str = str(user_id)
+        u_id_val = self._to_id(user_id)
         update_query = {"$inc": {"total_matches": 1}}
         if is_win:
             update_query["$inc"]["total_wins"] = 1
         
         user = await self.collection.find_one_and_update(
-            {"_id": ObjectId(u_id_str)},
+            {"_id": u_id_val},
             update_query,
             session=session,
             return_document=True
@@ -70,94 +72,70 @@ class UserRepository:
 
         if user:
             total_wins = user.get("total_wins", 0)
-            redis_client.zadd("leaderboard:wins", {u_id_str: total_wins})
+            redis_client.zadd("leaderboard:wins", {str(user_id): total_wins})
             redis_client.delete("cache:leaderboard_full")
         
         return user
 
-    # --- 🚀 MATCH FINALIZATION & PAYOUT (FIXED FOR OPTION B) ---
+    # --- 🚀 MATCH FINALIZATION & PAYOUT ---
 
-    async def process_match_payout(
-        self, 
-        match_id: str, 
-        winner_id: str, 
-        player1_id: str, 
-        player2_id: str, 
-        p1_score: int, 
-        p2_score: int,
-        is_draw: bool = False
-    ):
-        """
-        🚀 SECURE TRANSACTION: Handles Payouts and History for both Ranked and Challenge matches.
-        """
+    async def process_match_payout(self, match_id: str, winner_id: str, player1_id: str, player2_id: str, p1_score: int, p2_score: int, is_draw: bool = False):
         try:
-            # 1. UPSERT Match Record: Create it if it doesn't exist (Fix for Friendly Matches)
             match_doc = await self.matches_collection.find_one({"match_id": match_id})
             
             if not match_doc:
-                logger.info(f"Creating on-the-fly match record for Friendly Battle: {match_id}")
+                logger.info(f"Creating record for match: {match_id}")
                 await self.matches_collection.insert_one({
                     "match_id": match_id,
-                    "player1_id": ObjectId(player1_id),
-                    "player2_id": ObjectId(player2_id),
-                    "mode": "challenge", # Identify as Friendly
+                    "player1_id": self._to_id(player1_id), # ✅ Safe ID
+                    "player2_id": self._to_id(player2_id), # ✅ Safe ID
+                    "mode": "challenge",
                     "status": "pending",
                     "created_at": datetime.now(timezone.utc)
                 })
             elif match_doc.get("status") == "completed":
-                logger.warning(f"Match {match_id} already finalized.")
                 return False
 
-            # 2. Start Atomic Transaction
             async with await db.client.start_session() as session:
                 async with session.start_transaction():
-                    
-                    # A. Lock the match record to COMPLETED
                     await self.matches_collection.update_one(
                         {"match_id": match_id},
                         {"$set": {
                             "status": "completed",
-                            "winner_id": ObjectId(winner_id) if winner_id else None,
+                            "winner_id": self._to_id(winner_id) if winner_id else None, # ✅ Safe ID
                             "final_scores": {player1_id: p1_score, player2_id: p2_score},
                             "finished_at": datetime.now(timezone.utc)
                         }},
                         session=session
                     )
 
-                    # B. Payouts (Winners get 90, Draws get 50 back)
                     if is_draw:
                         await self.update_wallet(player1_id, 50.0, session=session)
                         await self.update_wallet(player2_id, 50.0, session=session)
                     else:
                         await self.update_wallet(winner_id, 90.0, session=session)
 
-                    # C. Update Global Stats & Leaderboard
                     await self.record_match_stats(player1_id, is_win=(winner_id == player1_id), session=session)
                     await self.record_match_stats(player2_id, is_win=(winner_id == player2_id), session=session)
 
-                    # D. Add to Personal History (Recent Matches)
                     await self._quick_history_add(player1_id, match_id, player2_id, p1_score, p2_score, winner_id, session)
                     await self._quick_history_add(player2_id, match_id, player1_id, p2_score, p1_score, winner_id, session)
 
-            logger.info(f"✅ Payout & History Successful: Match {match_id}")
             return True
-
         except Exception as e:
-            logger.error(f"❌ CRITICAL TRANSACTION FAILURE: {e}")
+            logger.error(f"❌ Payout Failure: {e}")
             return False
 
     async def _quick_history_add(self, user_id, match_id, op_id, my_score, op_score, winner_id, session):
-        """Internal helper for history updates. Now includes 'mode' for frontend badges."""
-        op_user = await self.collection.find_one({"_id": ObjectId(op_id)}, {"username": 1}, session=session)
+        # ✅ Safe ID check for opponent
+        op_user = await self.collection.find_one({"_id": self._to_id(op_id)}, {"username": 1}, session=session)
         op_name = op_user.get("username", "Opponent") if op_user else "Opponent"
 
         result_str = "DRAW" if not winner_id else ("WON" if str(winner_id) == str(user_id) else "LOST")
-        
-        # Determine mode based on match_id prefix or metadata
         mode = "challenge" if "match_" in str(match_id) else "ranked"
 
         await self.collection.update_one(
-            {"_id": ObjectId(user_id)},
+            {"_id": self._to_id(user_id)}, # ✅ Safe ID
             {"$push": {
                 "recent_matches": {
                     "$each": [{
@@ -174,69 +152,3 @@ class UserRepository:
             }},
             session=session
         )
-    
-    # --- 🎁 REFERRAL METHODS ---
-
-    async def get_by_referral_code(self, code: str):
-        """Find a user by their unique sharing code."""
-        # We use .upper() to make the search case-insensitive
-        return await self.collection.find_one({"referral_code": code.upper()})
-
-    async def apply_referral_bonus(self, downloader_id: str, giver_id: str, amount: float = 200.0):
-        """
-        🚀 ATOMIC REFERRAL TRANSACTION
-        Ensures both users get the 200 PKR reward and links the accounts.
-        """
-        try:
-            async with await db.client.start_session() as session:
-                async with session.start_transaction():
-                    # 1. Reward the Giver (The person who shared the code)
-                    await self.collection.update_one(
-                        {"_id": ObjectId(str(giver_id))},
-                        {"$inc": {"wallet_balance": amount}},
-                        session=session
-                    )
-
-                    # 2. Reward the Downloader & Mark them as 'referred'
-                    await self.collection.update_one(
-                        {"_id": ObjectId(str(downloader_id))},
-                        {
-                            "$inc": {"wallet_balance": amount},
-                            "$set": {"referred_by": str(giver_id)}
-                        },
-                        session=session
-                    )
-            
-            # 3. Clean up cache so the UI updates immediately
-            redis_client.delete("stats:total_pool")
-            # If you cache user profiles, delete that key here too:
-            # redis_client.delete(f"user:profile:{downloader_id}")
-            
-            return True
-        except Exception as e:
-            logger.error(f"❌ Referral Transaction Failed: {e}")
-            return False
-        
-    async def create_user(self, user_data: dict):
-        """
-        Finalized create_user: Ensures all necessary fields exist 
-        before inserting into MongoDB.
-        """
-        # Ensure list exists for history
-        if "recent_matches" not in user_data:
-            user_data["recent_matches"] = []
-            
-        # Initialize wallet if not already set by service
-        if "wallet_balance" not in user_data:
-            user_data["wallet_balance"] = 0.0
-            
-        # Initialize referral tracking
-        if "referred_by" not in user_data:
-            user_data["referred_by"] = None 
-            
-        # IMPORTANT: We do NOT set this to None if it already exists
-        if "referral_code" not in user_data:
-            user_data["referral_code"] = None 
-
-        result = await self.collection.insert_one(user_data)
-        return str(result.inserted_id)

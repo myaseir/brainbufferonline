@@ -1,6 +1,8 @@
 import uuid
 import json
 import logging
+import asyncio # 🔥 Added for the timer
+import random  # 🔥 Added for picking a bot
 from datetime import datetime, timezone
 from fastapi import HTTPException
 from app.repositories.match_repo import MatchRepository
@@ -40,16 +42,12 @@ class MatchmakingService:
                     return {"status": "WAITING"}
 
                 # --- ✅ MATCH FOUND: DEDUCT & CREATE ---
-                # We deduct here because we are sure a match is starting
                 await self.user_repo.update_wallet(user_id, -50.0)
                 
                 match_id = f"match_{uuid.uuid4().hex[:8]}"
 
-                # 🚨 SAFETY UPDATE: Wrap DB creation in try/except 
                 try:
                     await self.match_repo.create_match_record(match_id, opponent_id, user_id, 50.0)
-                    
-                    # Notify the opponent who was already waiting
                     redis_client.set(f"notify:{opponent_id}", match_id, ex=30)
                     
                     return {
@@ -61,29 +59,59 @@ class MatchmakingService:
 
                 except Exception as db_error:
                     logger.error(f"❌ Failed to create match in DB: {db_error}")
-                    
-                    # 1. Refund the current user immediately
                     await self.user_repo.update_wallet(user_id, 50.0)
-                    
-                    # 2. Put the opponent back in the pool (so they don't lose their spot/money)
                     redis_client.sadd("matchmaking_pool", opponent_id)
-                    
                     raise HTTPException(status_code=500, detail="Match creation failed. Funds refunded.")
 
             else:
-                # --- ⏳ JOIN THE POOL ---
-                # We deduct upfront to "lock" the player in
+                # --- ⏳ JOIN THE POOL & START BOT TIMER ---
                 await self.user_repo.update_wallet(user_id, -50.0)
                 
-                # Critical: If this Redis call fails, we must refund immediately!
                 try:
                     redis_client.sadd("matchmaking_pool", user_id)
-                except Exception as redis_err:
-                    logger.error(f"Redis sadd failed: {redis_err}")
-                    await self.user_repo.update_wallet(user_id, 50.0) # REFUND
-                    raise HTTPException(status_code=500, detail="Matchmaking server busy. Funds refunded.")
 
-                return {"status": "WAITING", "user_id": user_id}
+                    # 🔥 NEW: 3-SECOND WAIT FOR HUMAN
+                    for _ in range(3):
+                        await asyncio.sleep(1)
+                        # Check if a human 'popped' us while we were sleeping
+                        notif = redis_client.get(f"notify:{user_id}")
+                        if notif:
+                            match_id = notif.decode() if isinstance(notif, bytes) else notif
+                            return {"status": "MATCHED", "match_id": match_id}
+
+                    # 🔥 NEW: BOT FALLBACK (After 3 seconds)
+                    # 1. Remove user from human pool
+                    redis_client.srem("matchmaking_pool", user_id)
+                    
+                    # 2. Pick a random Pakistani Bot (BOT_001 to BOT_020)
+                    bot_num = random.randint(1, 20)
+                    bot_id = f"BOT_{bot_num:03d}"
+                    match_id = f"match_{uuid.uuid4().hex[:8]}"
+
+                    # 3. Create Record & Redis Metadata
+                    await self.match_repo.create_match_record(match_id, bot_id, user_id, 50.0)
+                    
+                    match_key = f"match:live:{match_id}"
+                    redis_client.hset(match_key, mapping={
+                        "p1_id": user_id,
+                        "p2_id": bot_id,
+                        "status": "CREATED",
+                        "bet_amount": "50.0"
+                    })
+                    redis_client.expire(match_key, 600)
+
+                    return {
+                        "status": "MATCHED",
+                        "match_id": match_id,
+                        "opponent_id": bot_id,
+                        "entry_fee": 50.0
+                    }
+
+                except Exception as redis_err:
+                    logger.error(f"Bot/Pool Error: {redis_err}")
+                    await self.user_repo.update_wallet(user_id, 50.0) 
+                    redis_client.srem("matchmaking_pool", user_id)
+                    raise HTTPException(status_code=500, detail="Matchmaking server busy. Funds refunded.")
 
         except HTTPException as he:
             raise he
@@ -104,22 +132,16 @@ class MatchmakingService:
     async def cancel_matchmaking(self, user_id: str):
         """Removes user from pool and refunds the 50 PKR."""
         try:
-            # Atomic removal attempt
             removed = redis_client.srem("matchmaking_pool", user_id)
-            
             if removed:
-                # ONLY refund if they were successfully taken out of the pool
                 await self.user_repo.update_wallet(user_id, 50.0)
                 logger.info(f"✅ User {user_id} cancelled and was refunded 50 PKR.")
                 return {"status": "cancelled", "refunded": True}
             else:
-                # If NOT in pool, they might already be in a match
                 notif = redis_client.get(f"notify:{user_id}")
                 if notif:
                     return {"status": "error", "message": "Match already started. Cannot cancel."}
-                
                 return {"status": "not_in_pool", "refunded": False}
-
         except Exception as e:
             logger.error(f"Cancel Matchmaking Redis Error: {e}")
             raise HTTPException(status_code=500, detail="Service unavailable. Could not verify refund.")

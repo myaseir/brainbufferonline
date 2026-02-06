@@ -70,7 +70,9 @@ class RedisManager:
 
     @staticmethod
     async def store_match_state(match_id: str, data: dict):
-        redis_client.hset(f"match:{match_id}", mapping=data)
+        # Using hset with a dictionary works well for storing match metadata
+        # which the Bot Service will poll to detect new games.
+        redis_client.hset(f"match:{match_id}", values=data)
         redis_client.expire(f"match:{match_id}", 3600)
 
 # Create a singleton instance
