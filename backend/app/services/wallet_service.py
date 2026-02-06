@@ -106,10 +106,10 @@ class WalletService:
         success = await self.user_repo.apply_referral_bonus(
             downloader_id=str(current_user["_id"]),
             giver_id=str(giver["_id"]),
-            amount=200.0
+            amount=100.0
         )
 
         if success:
-            return {"success": True, "message": "200 PKR added to both accounts!"}
+            return {"success": True, "message": "100 PKR added to both accounts!"}
         
         return {"success": False, "error": "Transaction failed. Please try again."}
