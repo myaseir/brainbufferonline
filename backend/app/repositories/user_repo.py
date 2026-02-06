@@ -54,6 +54,19 @@ class UserRepository:
         except Exception as e:
             logger.error(f"Error fetching user by email: {e}")
             return None
+    
+    async def get_by_username(self, username: str):
+        """
+        Used by AuthService to find a user by their unique username during login/signup.
+        """
+        try:
+            user = await self.collection.find_one({"username": username.strip()})
+            if user:
+                user["_id"] = str(user["_id"])
+            return user
+        except Exception as e:
+            logger.error(f"Error fetching user by username: {e}")
+            return None
 
     # --- 💰 WALLET & STATS METHODS ---
 
