@@ -55,6 +55,17 @@ class UserRepository:
             logger.error(f"Error fetching user by email: {e}")
             return None
     
+    async def create_user(self, user_data: dict):
+        """
+        Inserts a new user document into MongoDB and returns the new ID.
+        """
+        try:
+            result = await self.collection.insert_one(user_data)
+            return result.inserted_id
+        except Exception as e:
+            logger.error(f"Error creating user: {e}")
+            raise e
+    
     async def get_by_username(self, username: str):
         """
         Used by AuthService to find a user by their unique username during login/signup.
