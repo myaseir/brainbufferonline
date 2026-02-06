@@ -71,3 +71,28 @@ class MatchRepository:
 
     async def cleanup_queue(self, user_id: str):
         redis_client.srem("matchmaking_pool", str(user_id))
+        
+    async def get_match_audit_data(self, match_id: str):
+        """
+        Fetches raw match details including player names and final scores.
+        """
+        # Ensure the collection is accessed correctly
+        match = await self.collection.find_one({"match_id": match_id})
+        
+        if not match:
+            return None
+            
+        # Convert ObjectIds to strings for JSON compatibility
+        match["_id"] = str(match["_id"])
+        
+        # Standardized indentation to prevent syntax errors
+        if match.get("player1_id"):
+            match["player1_id"] = str(match["player1_id"])
+            
+        if match.get("player2_id"):
+            match["player2_id"] = str(match["player2_id"])
+            
+        if match.get("winner_id"):
+            match["winner_id"] = str(match["winner_id"])
+        
+        return match

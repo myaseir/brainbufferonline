@@ -3,6 +3,8 @@ from typing import Dict
 import logging
 import json
 from app.db.redis import redis_client
+from datetime import datetime  # ✅ Fixed import
+import datetime as dt # Optional: if you need the whole module
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -16,12 +18,8 @@ class LobbyManager:
     async def connect(self, user_id: str, websocket: WebSocket):
         await websocket.accept()
         
-        # ✅ REDIS OPTIMIZATION:
-        # Only set Redis key and broadcast if the user is NOT already marked online locally.
-        # This prevents flooding Upstash with 'SET' requests on every page refresh.
         if self.local_presence.get(user_id) != "online":
             try:
-                # Use "user_status" to match friend_repo logic
                 redis_client.set(f"user_status:{user_id}", "online", ex=3600)
                 await self.broadcast_user_status(user_id, "online")
                 self.local_presence[user_id] = "online"
@@ -32,13 +30,9 @@ class LobbyManager:
         logger.info(f"✅ User {user_id} connected to Lobby")
 
     async def disconnect(self, user_id: str):
-        # Remove the specific connection
         if user_id in self.active_connections:
             del self.active_connections[user_id]
         
-        # ✅ REDIS OPTIMIZATION:
-        # Only delete from Redis if there are NO remaining connections for this user.
-        # (Useful if the user has multiple tabs open)
         if user_id not in self.active_connections:
             try:
                 redis_client.delete(f"user_status:{user_id}")
@@ -51,9 +45,6 @@ class LobbyManager:
             logger.info(f"❌ User {user_id} disconnected from Lobby")
 
     async def broadcast_user_status(self, user_id: str, status: str):
-        """
-        Notify all connected users about a status change.
-        """
         payload = {
             "type": "USER_STATUS_CHANGE",
             "user_id": user_id,
@@ -62,23 +53,17 @@ class LobbyManager:
         
         disconnected_users = []
         for uid, socket in self.active_connections.items():
-            # Don't send the update to the user who just changed status
             if uid == user_id:
                 continue
-                
             try:
                 await socket.send_json(payload)
             except Exception:
-                # Catch dead sockets during broadcast
                 disconnected_users.append(uid)
         
         for uid in disconnected_users:
             await self.disconnect(uid)
 
     async def send_personal_message(self, message: dict, user_id: str):
-        """
-        Direct messaging for challenges/invites.
-        """
         if user_id in self.active_connections:
             websocket = self.active_connections[user_id]
             try:
@@ -89,6 +74,25 @@ class LobbyManager:
                 await self.disconnect(user_id)
                 return False
         return False
+    
+    # ✅ FIXED: Now properly indented inside the class
+    async def broadcast_global_announcement(self, message: str):
+        """
+        Sends a system-wide alert to every user currently in the lobby.
+        """
+        payload = {
+            "type": "GLOBAL_ANNOUNCEMENT",
+            "message": message,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Send to all connected sockets
+        for user_id, socket in self.active_connections.items():
+            try:
+                await socket.send_json(payload)
+            except Exception:
+                # Heartbeat or future logic will clean up dead sockets
+                continue
 
 # Global instance
 lobby_manager = LobbyManager()

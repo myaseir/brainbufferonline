@@ -2,17 +2,23 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation'; 
 import { toast } from 'react-hot-toast';
-import { Swords, Check, X, Loader2 } from 'lucide-react'; 
+import { Swords, Check, X, Loader2, Megaphone } from 'lucide-react'; 
 
 const LobbyListener = ({ onJoinChallenge }) => {
   const router = useRouter();
   const socketRef = useRef(null);
   const loadingToastId = useRef(null);
+  
+  // Ref for the notification sound
+  const notificationSound = useRef(null);
 
   const [incomingChallenge, setIncomingChallenge] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
+    // Initialize sound - using a clean, professional "ping" sound
+    notificationSound.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+
     const token = localStorage.getItem('token');
     if (!token) return;
 
@@ -29,7 +35,35 @@ const LobbyListener = ({ onJoinChallenge }) => {
       }
 
       switch (data.type) {
+        // 📢 NEW: GLOBAL ANNOUNCEMENT HANDLER
+        case 'GLOBAL_ANNOUNCEMENT':
+          // Play sound
+          if (notificationSound.current) {
+            notificationSound.current.play().catch(e => console.log("Audio play blocked by browser"));
+          }
+
+          toast(data.message, {
+            duration: 8000,
+            position: 'top-center',
+            icon: '📢',
+            style: {
+              background: '#0f172a', // Slate-900
+              color: '#fff',
+              borderRadius: '16px',
+              border: '2px solid #10b981', // Emerald-500
+              fontSize: '14px',
+              fontWeight: 'bold',
+              maxWidth: '450px',
+            },
+          });
+          break;
+
         case 'INCOMING_CHALLENGE':
+          // Also play sound for incoming challenges
+          if (notificationSound.current) {
+            notificationSound.current.play().catch(e => console.log("Audio play blocked"));
+          }
+
           setIncomingChallenge({
             challengerId: data.challenger_id,
             challengerName: data.challenger_name,
@@ -120,8 +154,6 @@ const LobbyListener = ({ onJoinChallenge }) => {
         key={incomingChallenge.receivedAt} 
         className="bg-white rounded-2xl shadow-2xl p-6 w-96 border-4 border-emerald-500 relative overflow-hidden"
       >
-        
-        {/* Progress Bar (Visual indicator of time remaining) */}
         {!isProcessing && (
             <div className="absolute top-0 left-0 h-2 bg-red-500 animate-timer-shrink" />
         )}

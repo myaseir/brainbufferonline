@@ -7,10 +7,14 @@ from app.db.redis import redis_client
 from bson import ObjectId
 from datetime import datetime, timezone
 import json
+from app.services.lobby_manager import lobby_manager
+from app.repositories.match_repo import MatchRepository
+
 
 router = APIRouter()
 user_repo = UserRepository()
 wallet_service = WalletService()
+match_repo = MatchRepository()
 
 # --- 📊 ANALYTICS ---
 @router.get("/revenue/today")
@@ -114,6 +118,13 @@ async def get_users(
             ]
         }
 
+    # 1. Get the total count of users matching the query
+    total_users = await db["users"].count_documents(query)
+
+    # 2. Calculate total pages (e.g., 45 users / 20 limit = 3 pages)
+    total_pages = (total_users + limit - 1) // limit
+
+    # 3. Fetch the specific slice of users
     users_cursor = db["users"].find(query).skip(skip).limit(limit).sort("created_at", -1)
     users = await users_cursor.to_list(limit)
     
@@ -121,8 +132,13 @@ async def get_users(
     for u in users:
         u["_id"] = str(u["_id"])
         
-    return {"users": users}
-
+    # 4. Return users AND the pagination metadata
+    return {
+        "users": users,
+        "total_pages": total_pages,
+        "total_users": total_users,
+        "current_page": page
+    }
 # --- 💰 DEPOSITS ---
 @router.get("/deposits/pending")
 async def get_pending_deposits(admin: dict = Depends(get_current_admin)):
@@ -155,6 +171,29 @@ async def process_deposit(trx_id: str, action: str, admin: dict = Depends(get_cu
             {"$set": {"status": "REJECTED", "rejected_at": datetime.now(timezone.utc)}}
         )
     return {"status": "success"}
+
+@router.post("/system/reset-finances")
+async def reset_financial_stats(admin: dict = Depends(get_current_admin)):
+    db = user_repo.collection.database
+    
+    try:
+        # 1. Reset Inflow: Deletes all deposit records
+        await db["deposits"].delete_many({})
+        
+        # 2. Reset Outflow: Deletes all withdrawal records
+        await db["withdrawals"].delete_many({})
+        
+        # 3. Reset Profit: Deletes all match records (where commission is stored)
+        await db["matches"].delete_many({})
+        
+        # 4. Optional: Reset User Wallets (set everyone back to zero balance)
+        # If you don't do this, "System Liquidity" will still show the sum of current wallets
+        await db["users"].update_many({}, {"$set": {"wallet_balance": 0}})
+
+        return {"status": "success", "message": "Financial metrics reset to zero."}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # --- 🏦 WITHDRAWALS (MISSING IN YOUR CODE) ---
 @router.get("/withdrawals/pending")
@@ -253,3 +292,28 @@ async def get_peak_activity(admin: dict = Depends(get_current_admin)):
         print(f"Stats Error: {e}")
         return []
     
+@router.post("/broadcast")
+async def send_global_announcement(data: dict, admin: dict = Depends(get_current_admin)):
+    message = data.get("message")
+    if not message:
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+        
+    await lobby_manager.broadcast_global_announcement(message)
+    return {"status": "success", "sent_to": len(lobby_manager.active_connections)}
+
+# 2. 🔍 MATCH AUDIT
+@router.get("/match/{match_id}/audit")
+async def get_match_audit(match_id: str, admin: dict = Depends(get_current_admin)):
+    audit_data = await match_repo.get_match_audit_data(match_id)
+    if not audit_data:
+        raise HTTPException(status_code=404, detail="Match not found")
+        
+    # Prepare the specific fields the AuditModal expects
+    return {
+        "match_id": audit_data["match_id"],
+        "p1_score": audit_data.get("scores", {}).get(str(audit_data.get("player1_id")), 0),
+        "p2_score": audit_data.get("scores", {}).get(str(audit_data.get("player2_id")), 0),
+        "status": audit_data["status"],
+        "stake": audit_data["stake"],
+        "winner_id": str(audit_data["winner_id"]) if audit_data.get("winner_id") else None
+    }
