@@ -314,27 +314,55 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
       )}
 
       {showWithdrawModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
-          <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl relative">
-            <button onClick={() => setShowWithdrawModal(false)} className="absolute top-6 right-6 p-2 bg-slate-50 rounded-xl text-slate-400"><X size={20} /></button>
-            <div className="flex items-center gap-4 mb-8">
-              <div className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center"><Wallet size={24} /></div>
-              <h2 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Withdrawal</h2>
-            </div>
-            <form onSubmit={handleWithdraw} className="space-y-4">
-              <input type="number" min="1" required placeholder="Amount (PKR)" value={withdrawData.amount} onChange={(e) => setWithdrawData({...withdrawData, amount: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold outline-none" />
-              <div className="grid grid-cols-2 gap-4">
-                {["Easypaisa", "JazzCash"].map((m) => (
-                  <button key={m} type="button" onClick={() => setWithdrawData({...withdrawData, method: m})} className={`p-4 rounded-2xl text-[10px] font-black uppercase border-2 transition-all ${withdrawData.method === m ? "border-emerald-500 bg-emerald-50 text-emerald-600" : "border-slate-50 text-slate-300"}`}>{m}</button>
-                ))}
-              </div>
-              <input type="text" required placeholder="Account Number" value={withdrawData.accountNumber} onChange={(e) => setWithdrawData({...withdrawData, accountNumber: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold outline-none" />
-              <input type="text" required placeholder="Account Title" value={withdrawData.accountName} onChange={(e) => setWithdrawData({...withdrawData, accountName: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold outline-none" />
-              <button type="submit" disabled={isSubmitting} className="w-full bg-slate-900 text-white p-5 rounded-3xl font-black uppercase text-xs hover:bg-emerald-600 disabled:opacity-50 transition-all">{isSubmitting ? "Processing..." : "Confirm Withdrawal"}</button>
-            </form>
-          </div>
+  <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+    <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl relative">
+      <button onClick={() => setShowWithdrawModal(false)} className="absolute top-6 right-6 p-2 bg-slate-50 rounded-xl text-slate-400"><X size={20} /></button>
+      
+      <div className="flex items-center gap-4 mb-8">
+        <div className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center"><Wallet size={24} /></div>
+        <div>
+          <h2 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Withdrawal</h2>
+          {/* Added a helper text for the user */}
+          <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Min. 300 PKR required</p>
         </div>
-      )}
+      </div>
+
+      <form onSubmit={handleWithdraw} className="space-y-4">
+        <div className="relative">
+          <input 
+            type="number" 
+            min="300" // Updated from 1 to 300
+            required 
+            placeholder="Amount (PKR)" 
+            value={withdrawData.amount} 
+            onChange={(e) => setWithdrawData({...withdrawData, amount: e.target.value})} 
+            className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500/20" 
+          />
+          {withdrawData.amount > 0 && withdrawData.amount < 300 && (
+            <span className="absolute right-8 top-1/2 -translate-y-1/2 text-[10px] font-black text-red-500 uppercase">Below Min</span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          {["Easypaisa", "JazzCash"].map((m) => (
+            <button key={m} type="button" onClick={() => setWithdrawData({...withdrawData, method: m})} className={`p-4 rounded-2xl text-[10px] font-black uppercase border-2 transition-all ${withdrawData.method === m ? "border-emerald-500 bg-emerald-50 text-emerald-600" : "border-slate-50 text-slate-300"}`}>{m}</button>
+          ))}
+        </div>
+
+        <input type="text" required placeholder="Account Number" value={withdrawData.accountNumber} onChange={(e) => setWithdrawData({...withdrawData, accountNumber: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold outline-none" />
+        <input type="text" required placeholder="Account Title" value={withdrawData.accountName} onChange={(e) => setWithdrawData({...withdrawData, accountName: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold outline-none" />
+        
+        <button 
+          type="submit" 
+          disabled={isSubmitting || withdrawData.amount < 300} // Extra safety check
+          className="w-full bg-slate-900 text-white p-5 rounded-3xl font-black uppercase text-xs hover:bg-emerald-600 disabled:opacity-50 transition-all shadow-xl shadow-slate-900/10"
+        >
+          {isSubmitting ? "Processing..." : "Confirm Withdrawal"}
+        </button>
+      </form>
+    </div>
+  </div>
+)}
 
       <SupportModal isOpen={showSupport} onClose={() => setShowSupport(false)} />
       

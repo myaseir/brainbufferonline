@@ -37,9 +37,13 @@ export default function Navbar({ user, onDeposit, onWithdraw, onLogout, onOpenFr
       {/* 1. User Profile Section */}
       <div className="flex items-center gap-4 w-full md:w-auto justify-center md:justify-start">
         <div className="relative shrink-0">
-          <div className="w-14 h-14 md:w-16 md:h-16 bg-gradient-to-tr from-green-400 to-emerald-300 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-green-200">
-            <User size={28} className="md:w-8 md:h-8" />
-          </div>
+          <div className="w-14 h-14 md:w-16 md:h-16 bg-slate-900 rounded-2xl flex items-center justify-center shadow-lg shadow-green-500/20 overflow-hidden border border-slate-800">
+  <img 
+    src="/brainbufferlogo.png" 
+    alt="Logo" 
+    className="w-full h-full object-contain p-1.5" 
+  />
+</div>
           <div className="absolute -bottom-1 -right-1 w-4 h-4 md:w-5 md:h-5 bg-green-400 border-4 border-white rounded-full"></div>
         </div>
         

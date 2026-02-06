@@ -132,17 +132,24 @@ export default function Auth({ onLoginSuccess }) {
         <div className="w-full max-w-md bg-white/80 backdrop-blur-xl rounded-[2.5rem] shadow-2xl shadow-green-900/10 p-6 md:p-10 border border-white relative z-10 transition-all hover:shadow-green-900/20">
           
           {/* Branding */}
-          <div className="text-center mb-6 md:mb-8">
-            <div className="w-14 h-14 md:w-16 md:h-16 bg-gradient-to-tr from-green-400 to-emerald-400 rounded-2xl flex items-center justify-center text-white mx-auto mb-4 md:mb-6 shadow-lg shadow-green-200 animate-pulse">
-              <ShieldCheck size={32} />
-            </div>
-            <h1 className="text-2xl md:text-3xl font-black tracking-tighter text-slate-900 uppercase">
-              Brain<span className="text-green-500">Buffer</span>
-            </h1>
-            <p className="text-slate-400 text-[8px] md:text-[9px] font-bold uppercase tracking-[0.25em] mt-2">
-              {step === 'otp' ? 'Verification' : (isLogin ? 'Competitive Arena Access' : 'Register Commander Profile')}
-            </p>
-          </div>
+        
+<div className="text-center mb-6 md:mb-8">
+<div className="w-20 h-20 md:w-24 md:h-24 bg-slate-900 rounded-[2rem] flex items-center justify-center mx-auto mb-4 md:mb-6 shadow-xl shadow-green-500/20 animate-pulse relative overflow-hidden border border-slate-800">
+  <Image 
+    src="/brainbuffer.png" 
+    alt="BrainBuffer Logo"
+    width={96}      // Increased to match container
+    height={96} 
+    className="object-contain p-1" // Reduced padding from p-2 to p-1 to make the brain bigger
+  />
+</div>
+  <h1 className="text-2xl md:text-3xl font-black tracking-tighter text-slate-900 uppercase">
+    Brain<span className="text-green-500">Buffer</span>
+  </h1>
+  <p className="text-slate-400 text-[8px] md:text-[9px] font-bold uppercase tracking-[0.25em] mt-2">
+    {step === 'otp' ? 'Verification' : (isLogin ? 'Competitive Arena Access' : 'Register Commander Profile')}
+  </p>
+</div>
 
           {step === 'form' ? (
             <form onSubmit={isLogin ? handleLogin : handleSignupRequest} className="space-y-3 md:space-y-4">
