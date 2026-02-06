@@ -40,6 +40,20 @@ class UserRepository:
         except Exception as e:
             logger.error(f"Error in get_by_id: {e}")
             return None
+        
+    async def get_by_email(self, email: str):
+        """
+        Used by AuthService to find a user by their email during login.
+        """
+        try:
+            user = await self.collection.find_one({"email": email.lower().strip()})
+            if user:
+                # Ensure the _id is converted to a string for the JWT payload
+                user["_id"] = str(user["_id"])
+            return user
+        except Exception as e:
+            logger.error(f"Error fetching user by email: {e}")
+            return None
 
     # --- 💰 WALLET & STATS METHODS ---
 
@@ -72,7 +86,12 @@ class UserRepository:
 
         if user:
             total_wins = user.get("total_wins", 0)
-            redis_client.zadd("leaderboard:wins", {str(user_id): total_wins})
+            # ✅ FIX FOR UPSTASH: Use a dictionary for the mapping
+            try:
+                redis_client.zadd("leaderboard:wins", {str(user_id): total_wins})
+            except Exception as e:
+                logger.error(f"Leaderboard Update Failed: {e}")
+                
             redis_client.delete("cache:leaderboard_full")
         
         return user
