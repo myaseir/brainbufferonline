@@ -20,6 +20,7 @@ class UserRepository:
         if ObjectId.is_valid(id_str):
             return ObjectId(id_str)
         return id_str
+    
 
     @property
     def collection(self):
@@ -195,3 +196,50 @@ class UserRepository:
             }},
             session=session
         )
+    async def get_referral_leaderboard(self, skip: int = 0, limit: int = 10):
+        """
+        Groups users by who referred them, counts them, and joins with user details.
+        """
+        pipeline = [
+            # 1. Filter: Only process users who were actually referred by someone
+            {"$match": {"referred_by": {"$ne": None}}}, 
+            
+            # 2. Group: Count how many times each 'Giver' ID appears
+            {"$group": {
+                "_id": "$referred_by", 
+                "referral_count": {"$sum": 1}
+            }},
+            
+            # 3. Sort: Highest referral counts at the top
+            {"$sort": {"referral_count": -1}}, 
+            
+            # 4. Pagination: Skip and Limit for the "Load More" feature
+            {"$skip": skip},
+            {"$limit": limit},
+            
+            # 5. Join: Pull the Giver's username and email from the users collection
+            {"$lookup": {
+                "from": "users",
+                "localField": "_id",
+                "foreignField": "_id",
+                "as": "user_info"
+            }},
+            
+            # 6. Flatten the joined data
+            {"$unwind": "$user_info"},
+            
+            # 7. Project: Format the final data for the Admin UI
+            {"$project": {
+                "username": "$user_info.username",
+                "email": "$user_info.email",
+                "referral_count": 1,
+                "total_earned": {"$multiply": ["$referral_count", 100.0]}
+            }}
+        ]
+        try:
+            cursor = self.collection.aggregate(pipeline)
+            return await cursor.to_list(length=limit)
+        except Exception as e:
+            logger.error(f"Error in referral leaderboard: {e}")
+            return []
+    

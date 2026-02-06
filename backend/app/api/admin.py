@@ -9,8 +9,6 @@ from datetime import datetime, timezone
 import json
 from app.services.lobby_manager import lobby_manager
 from app.repositories.match_repo import MatchRepository
-
-
 router = APIRouter()
 user_repo = UserRepository()
 wallet_service = WalletService()
@@ -317,3 +315,15 @@ async def get_match_audit(match_id: str, admin: dict = Depends(get_current_admin
         "stake": audit_data["stake"],
         "winner_id": str(audit_data["winner_id"]) if audit_data.get("winner_id") else None
     }
+
+@router.get("/referral-leaderboard") # This becomes /api/admin/referral-leaderboard
+async def admin_referral_leaderboard(
+    skip: int = Query(0, ge=0), 
+    limit: int = Query(10, le=50)
+):
+    """
+    Fetch the top earners from referrals for the admin dashboard.
+    """
+    repo = UserRepository()
+    data = await repo.get_referral_leaderboard(skip=skip, limit=limit)
+    return {"status": "success", "data": data}
