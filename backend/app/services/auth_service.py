@@ -61,7 +61,7 @@ class AuthService:
 
 
     def _generate_referral_code(self, username: str) -> str:
-        """Creates a code like OWAIS123"""
+        """Creates a code like BUFFER123"""
         prefix = "".join(filter(str.isalnum, username))[:4].upper()
         digits = "".join(random.choices(string.digits, k=3))
         return f"{prefix}{digits}"

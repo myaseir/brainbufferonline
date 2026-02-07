@@ -57,7 +57,7 @@ origins = [
     "http://127.0.0.1:3001",
     
     # 2. Production Websites
-    "https://brainbufferonline.vercel.app", 
+    "https://www.brainbufferofficial.com", 
     "https://admin-brainbuffer.vercel.app",
     "https://brainbufferonline.onrender.com",
 
