@@ -298,15 +298,7 @@ const [acceptedTerms, setAcceptedTerms] = useState(false);
           )}
         </div>
         <div className="mt-8 pt-6 border-t border-slate-100 flex items-center justify-center gap-6 opacity-60 grayscale hover:grayscale-0 transition-all">
-  <div className="flex flex-col items-center">
-    <p className="text-[7px] font-black uppercase tracking-widest text-slate-400 mb-2">Payout Partners</p>
-    <div className="flex gap-4 items-center">
-       {/* You can add small logos here later */}
-       <span className="text-[10px] font-bold text-slate-600">Easypaisa</span>
-       <span className="text-[10px] font-bold text-slate-600">JazzCash</span>
-       <span className="text-[10px] font-bold text-slate-600">Local Bank</span>
-    </div>
-  </div>
+  
 </div>
 
         {/* Scroll Hint */}
