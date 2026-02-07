@@ -345,6 +345,7 @@ const [acceptedTerms, setAcceptedTerms] = useState(false);
 
             <div className="mt-10 flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-6">
   <a 
+  
     href="https://github.com/myaseir/brainbufferofficial/releases/download/v4.7.0/BrainBuffer.apk" 
     download="BrainBuffer.apk"
     /* Changed w-full to w-fit and added md:px-12 for a more substantial look on laptop */

@@ -40,7 +40,7 @@ const shareToWhatsApp = () => {
     `2️⃣ Enter my code: *${referralCode}*\n` +
     `3️⃣ Get *100 PKR* added to your wallet immediately! 🎁\n\n` +
     `🚀 *Download Link:* \n` +
-    `https://brainbufferofficial.com\n\n` +
+    `https://www.brainbufferofficial.com\n\n` +
     `_Play. Sharpen. Earn._ 🇵🇰`;
 
   const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
