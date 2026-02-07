@@ -278,15 +278,32 @@ useEffect(() => {
             </div>
 
             <div className="relative group overflow-hidden bg-white border border-white rounded-[2.5rem] p-8 shadow-xl shadow-green-900/5">
-              <div className="relative z-10">
-                <div className="flex items-center gap-2 mb-4">
-                  <Crown className="text-amber-400" size={18} />
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Global Economy</span>
-                </div>
-                <div className="text-4xl font-black text-slate-900 tracking-tighter tabular-nums">
-                  {stats.global_stats?.total_pool || 0}<span className="text-lg text-slate-300 ml-2 font-bold">PKR</span>
-                </div>
-              </div>
+             <div className="relative group overflow-hidden bg-white border border-white rounded-[2.5rem] p-8 shadow-xl shadow-green-900/5">
+ <div className="relative group overflow-hidden bg-white border border-white rounded-[2.5rem] p-8 shadow-xl shadow-green-900/5">
+  <div className="relative z-10">
+    <div className="flex items-center gap-2 mb-4">
+      <Crown className="text-amber-400" size={18} />
+      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+        Total User Holdings
+      </span>
+    </div>
+    <div className="text-4xl font-black text-slate-900 tracking-tighter tabular-nums">
+      {/* 🛡️ This now accurately pulls the liquidity from your new backend logic */}
+      {Number(stats?.system_liquidity || stats?.global_stats?.system_liquidity || 0).toLocaleString()}
+      <span className="text-lg text-slate-300 ml-2 font-bold whitespace-nowrap"> PKR</span>
+    </div>
+  </div>
+
+  {/* Decorative Background Icon */}
+  <div className="absolute -right-4 -bottom-4 opacity-[0.03] rotate-12 text-slate-900">
+    <Trophy size={160} />
+  </div>
+</div>
+  {/* The decorative background icon */}
+  <div className="absolute -right-4 -bottom-4 opacity-[0.03] rotate-12 text-slate-900">
+    <Trophy size={160} />
+  </div>
+</div>
               <div className="absolute -right-4 -bottom-4 opacity-[0.03] rotate-12 text-slate-900"><Trophy size={160} /></div>
             </div>
 
