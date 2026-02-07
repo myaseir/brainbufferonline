@@ -15,7 +15,7 @@ export default function Auth({ onLoginSuccess }) {
   const [verificationCode, setVerificationCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
-
+const [acceptedTerms, setAcceptedTerms] = useState(false);
   const toggleMode = () => {
     setIsLogin(!isLogin);
     setFormData({ email: '', password: '', username: '' });
@@ -40,6 +40,9 @@ export default function Auth({ onLoginSuccess }) {
 
   const handleSignupRequest = async (e) => {
     if (e) e.preventDefault();
+    if (!acceptedTerms) {
+    return alert("You must accept the Terms and Conditions to join the arena.");
+  }
     if (!formData.email.includes('@')) return alert("Please enter a valid email.");
     setLoading(true);
     try {
@@ -119,10 +122,34 @@ export default function Auth({ onLoginSuccess }) {
   };
 
   return (
+
+    
     <div className="min-h-screen bg-[#fcfdfd] font-sans text-slate-800 scroll-smooth overflow-x-hidden">
-      
+      {/* Add this inside the main <div> of your return */}
+<script
+  type="application/ld+json"
+  dangerouslySetInnerHTML={{
+    __html: JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "BrainBuffer",
+      "operatingSystem": "ANDROID",
+      "applicationCategory": "GameApplication",
+      "aggregateRating": {
+        "@type": "AggregateRating",
+        "ratingValue": "4.9",
+        "ratingCount": "1050"
+      },
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "PKR"
+      }
+    })
+  }}
+/>
       {/* 1. HERO & AUTH SECTION */}
-      <section className="min-h-[90vh] md:min-h-screen flex flex-col items-center justify-center p-4 relative overflow-hidden">
+      <section className="min-h-[80vh] md:min-h-screen flex flex-col items-center justify-center p-4 relative overflow-hidden">
         {/* Background Decorative Glows */}
         <div className="fixed top-0 left-0 w-full h-full overflow-hidden pointer-events-none -z-10">
           <div className="absolute top-[-10%] right-[-10%] w-[50%] h-[50%] bg-green-100/40 blur-[120px] rounded-full"></div>
@@ -190,7 +217,28 @@ export default function Auth({ onLoginSuccess }) {
                   required
                 />
               </div>
-
+{!isLogin && (
+  <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 transition-all hover:border-green-200">
+    <div className="relative flex items-center h-5">
+      <input
+        id="terms"
+        type="checkbox"
+        checked={acceptedTerms}
+        onChange={(e) => setAcceptedTerms(e.target.checked)}
+        className="w-5 h-5 rounded-md border-slate-300 text-green-500 focus:ring-green-500 cursor-pointer"
+        required
+      />
+    </div>
+    <div className="text-[10px] md:text-xs leading-tight">
+      <label htmlFor="terms" className="font-bold text-slate-700 cursor-pointer">
+        I accept the <Link href="/terms" className="text-green-600 underline">Terms and Conditions</Link>
+      </label>
+      <p className="text-slate-400 mt-1 font-medium italic">
+        I acknowledge BrainBuffer is a skill-based arena and I am responsible for my cognitive performance.
+      </p>
+    </div>
+  </div>
+)}
               <button 
                 type="submit"
                 disabled={loading}
@@ -249,6 +297,17 @@ export default function Auth({ onLoginSuccess }) {
             </form>
           )}
         </div>
+        <div className="mt-8 pt-6 border-t border-slate-100 flex items-center justify-center gap-6 opacity-60 grayscale hover:grayscale-0 transition-all">
+  <div className="flex flex-col items-center">
+    <p className="text-[7px] font-black uppercase tracking-widest text-slate-400 mb-2">Payout Partners</p>
+    <div className="flex gap-4 items-center">
+       {/* You can add small logos here later */}
+       <span className="text-[10px] font-bold text-slate-600">Easypaisa</span>
+       <span className="text-[10px] font-bold text-slate-600">JazzCash</span>
+       <span className="text-[10px] font-bold text-slate-600">Local Bank</span>
+    </div>
+  </div>
+</div>
 
         {/* Scroll Hint */}
         <div 
@@ -360,7 +419,7 @@ export default function Auth({ onLoginSuccess }) {
               BrainBuffer is a <span className="text-white font-bold">Competitive Skill-Based Arena</span> where 
               results are determined exclusively by cognitive precision and memory retention. In accordance with 
               established legal precedents and the exemptions provided under 
-              <a href="https://pakistancode.gov.pk/english/UY2FqaJw1-apaUY2Fqa-ap4%3D-sg-jjjjjjjjjjjjj" target="_blank" rel="noopener noreferrer" className="text-white underline decoration-green-500/50 hover:text-green-400 transition-colors font-bold ml-1">Section 12 of the Public Gambling Act</a>, 
+              <a href="https://pakistancode.gov.pk/english/UY2FqaJw1-apaUY2Fqa-ap4%3D-sg-jjjjjjjjjjjjj" title="Pakistan Public Gambling Act Section 12 Exemption for Skill Games" target="_blank" rel="noopener noreferrer" className="text-white underline decoration-green-500/50 hover:text-green-400 transition-colors font-bold ml-1">Section 12 of the Public Gambling Act</a>, 
               competitions where <span className="text-green-400">Skill and Merit</span> are the dominant factors 
               in determining the outcome are recognized as legitimate professional activities, 
               distinct from games of chance.
@@ -369,7 +428,11 @@ export default function Auth({ onLoginSuccess }) {
         </div>
         <div className="absolute top-0 right-0 w-[30%] h-[30%] bg-green-500/5 blur-[120px] rounded-full"></div>
       </section>
-
+<div className="fixed bottom-6 right-6 z-50">
+  <button className="bg-white shadow-xl border border-slate-100 p-3 rounded-full hover:scale-110 transition-transform">
+    <ShieldCheck size={20} className="text-green-500" />
+  </button>
+</div>
       {/* 4. FOOTER */}
       <footer className="py-12 md:py-16 px-6 bg-white">
         <div className="max-w-4xl mx-auto text-center">

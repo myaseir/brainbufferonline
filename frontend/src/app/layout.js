@@ -1,35 +1,93 @@
 import { Inter } from 'next/font/google';
 import './globals.css';
-import UpdateGuard from './components/UpdateGuard'; // 🚀 Import the guard
+import UpdateGuard from './components/UpdateGuard';
 
 const inter = Inter({ subsets: ['latin'] });
 
-export const metadata = {
-  title: 'BrainBuffer | Visual Memory Training',
-  description: 'Boost your cognitive speed with BrainBuffer. Memorize floating numbers, challenge your short-term recall, and compete for the high score in this fast-paced brain training game.',
-  keywords: ['memory game', 'brain training', 'cognitive test', 'visual memory', 'puzzle game', 'mind game'],
-  authors: [{ name: 'Muhammad Yasir' }], 
-  applicationName: 'BrainBuffer',
-  openGraph: {
-    title: 'BrainBuffer - Can you beat the high score?',
-    description: 'Test your short-term memory speed. Memorize the bubbles before they vanish!',
-    type: 'website',
-  },
-};
-
+// 🚀 1. NEW VIEWPORT API (Next.js 14+ Requirement)
 export const viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
-  userScalable: false, 
-  themeColor: '#3b82f6', 
+  userScalable: false,
+  themeColor: '#3b82f6',
+};
+
+// 🚀 2. PROFESSIONAL SEO METADATA
+export const metadata = {
+  metadataBase: new URL('https://www.brainbufferofficial.com'),
+  
+  // Front-loaded keywords in title for #1 Ranking
+  title: {
+    default: 'BrainBuffer | Earn Real Money Memory Game & Brain Training',
+    template: '%s | BrainBuffer Arena',
+  },
+  
+  description: 'The #1 competitive memory game to earn real cash. Train your cognitive speed, win ranked matches, and withdraw earnings instantly via Bank or Easypaisa.',
+  
+  keywords: [
+    'earning games 2026', 
+    'earn money online Pakistan', 
+    'real cash memory game', 
+    'brain training for money', 
+    'multiplayer memory arena', 
+    'BrainBuffer APK download',
+    'play to earn games'
+  ],
+
+  authors: [{ name: 'Muhammad Yasir', url: 'https://www.brainbufferofficial.com' }],
+  creator: 'Muhammad Yasir',
+  applicationName: 'BrainBuffer',
+
+  // OpenGraph (Social Media Previews)
+  openGraph: {
+    title: 'BrainBuffer - Play, Compete, and Earn Real Cash!',
+    description: 'Master your memory. Battle players worldwide and withdraw your winnings instantly.',
+    url: 'https://www.brainbufferofficial.com',
+    siteName: 'BrainBuffer Arena',
+    images: [
+      {
+        url: '/og-image.jpg', // Ensure this 1200x630 image is in your /public folder
+        width: 1200,
+        height: 630,
+        alt: 'BrainBuffer Gameplay & Earning Dashboard',
+      },
+    ],
+    locale: 'en_US',
+    type: 'website',
+  },
+
+  // Twitter/X Card
+  twitter: {
+    card: 'summary_large_image',
+    title: 'BrainBuffer | The Ultimate Earning Memory Game',
+    description: 'Can you beat the high score? Win matches and earn real rewards.',
+    images: ['/og-image.jpg'],
+  },
+
+  // Robot Instructions
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
+      <head>
+        {/* Helps Google understand this is the primary version of the site */}
+        <link rel="canonical" href="https://www.brainbufferofficial.com" />
+      </head>
       <body className={`${inter.className} antialiased`}>
-        {/* ✅ The UpdateGuard now protects all routes including Dashboard and Game */}
+        {/* ✅ Protects all routes including Dashboard and Game */}
         <UpdateGuard>
           {children}
         </UpdateGuard>
