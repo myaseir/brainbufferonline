@@ -196,6 +196,51 @@ class UserRepository:
             }},
             session=session
         )
+        
+    async def get_by_referral_code(self, code: str):
+        """
+        Finds a user by their unique referral code and ensures ID serialization.
+        """
+        try:
+            user = await self.collection.find_one({"referral_code": code.upper().strip()})
+            if user:
+                # Convert ObjectIds to strings so FastAPI can serialize them to JSON
+                user["_id"] = str(user["_id"])
+                if user.get("referred_by"):
+                    user["referred_by"] = str(user["referred_by"])
+            return user
+        except Exception as e:
+            logger.error(f"Error fetching user by referral code: {e}")
+            return None
+    
+    async def apply_referral_bonus(self, downloader_id: str, giver_id: str, amount: float):
+        """
+        Atomically rewards both the new user and the referrer using a MongoDB transaction.
+        """
+        try:
+            # start_session is a synchronous call in Motor, though the session itself is used in async contexts
+            async with await db.client.start_session() as session:
+                async with session.start_transaction():
+                    # 1. Update the Giver (Referrer)
+                    await self.update_wallet(giver_id, amount, session=session)
+                    
+                    # 2. Update the Downloader (New User) and mark them as referred
+                    await self.collection.update_one(
+                        {"_id": self._to_id(downloader_id)},
+                        {
+                            "$inc": {"wallet_balance": amount},
+                            "$set": {"referred_by": self._to_id(giver_id)}
+                        },
+                        session=session
+                    )
+            
+            # Clear stats cache as the total system pool has changed
+            redis_client.delete("stats:total_pool")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Referral Transaction Failed: {e}")
+            return False
     async def get_referral_leaderboard(self, skip: int = 0, limit: int = 10):
         """
         Groups users by who referred them, counts them, and joins with user details.

@@ -131,12 +131,21 @@ async def signup_verify(data: VerifyRequest):
     
     return {"msg": "Account verified successfully", "user_id": str(user_id)}
 
-@router.get("/me")
+
 @router.get("/me")
 async def get_current_user_details(user: dict = Depends(get_current_user)):
     """
-    Returns the full profile including referral data.
+    Returns the full profile including referral data with serialized IDs.
     """
+    # 1. Handle potential ObjectIds in recent_matches list
+    recent_matches = user.get("recent_matches", [])
+    for match in recent_matches:
+        if "match_id" in match:
+            match["match_id"] = str(match["match_id"])
+        if "winner_id" in match:
+            match["winner_id"] = str(match["winner_id"])
+
+    # 2. Return serialized dictionary
     return {
         "username": user.get("username"),
         "email": user.get("email"),
@@ -145,10 +154,10 @@ async def get_current_user_details(user: dict = Depends(get_current_user)):
         "total_wins": user.get("total_wins", 0),
         "total_matches": user.get("total_matches", 0),
         "rank": user.get("rank", "Elite"),
-        "recent_matches": user.get("recent_matches", []),
-        # --- 🚀 ADD THESE TWO LINES ---
+        "recent_matches": recent_matches,
         "referral_code": user.get("referral_code"), 
-        "referred_by": user.get("referred_by")
+        # ✅ CRITICAL: Convert referred_by to string or None
+        "referred_by": str(user.get("referred_by")) if user.get("referred_by") else None
     }
 @router.post("/login")
 async def login(data: LoginRequest):

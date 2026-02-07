@@ -130,18 +130,38 @@ class MatchmakingService:
         return None
 
     async def cancel_matchmaking(self, user_id: str):
-        """Removes user from pool and refunds the 50 PKR."""
+        """
+        Removes user from pool and refunds the 50 PKR. 
+        Professional Update: Also refunds if a match was found but the game hasn't truly started.
+        """
         try:
+            # 1. Standard Case: User is still in the pool
             removed = redis_client.srem("matchmaking_pool", user_id)
             if removed:
                 await self.user_repo.update_wallet(user_id, 50.0)
                 logger.info(f"✅ User {user_id} cancelled and was refunded 50 PKR.")
                 return {"status": "cancelled", "refunded": True}
-            else:
-                notif = redis_client.get(f"notify:{user_id}")
-                if notif:
-                    return {"status": "error", "message": "Match already started. Cannot cancel."}
-                return {"status": "not_in_pool", "refunded": False}
+            
+            # 2. Professional Fallback: User was just 'popped' but hasn't played a single round
+            notif = redis_client.get(f"notify:{user_id}")
+            if notif:
+                match_id = notif.decode() if isinstance(notif, bytes) else str(notif)
+                match_key = f"match:live:{match_id}"
+                
+                # Check if the user has posted any score yet
+                has_score = redis_client.hexists(match_key, f"score:{user_id}")
+                
+                if not has_score:
+                    # Clear the notification and refund
+                    redis_client.delete(f"notify:{user_id}")
+                    await self.user_repo.update_wallet(user_id, 50.0)
+                    logger.info(f"✅ User {user_id} refunded for unstarted match: {match_id}")
+                    return {"status": "cancelled", "refunded": True}
+                else:
+                    return {"status": "error", "message": "Match in progress. Refund unavailable."}
+
+            return {"status": "not_in_pool", "refunded": False}
+
         except Exception as e:
-            logger.error(f"Cancel Matchmaking Redis Error: {e}")
+            logger.error(f"Cancel Matchmaking Error: {e}")
             raise HTTPException(status_code=500, detail="Service unavailable. Could not verify refund.")

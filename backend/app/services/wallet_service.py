@@ -88,24 +88,28 @@ class WalletService:
         return True
     
     async def claim_referral_bonus(self, current_user: dict, code: str):
-        # 1. Self-referral check
-        if current_user.get("referral_code") == code.upper():
+        # 1. Self-referral check (Case-insensitive)
+        if str(current_user.get("referral_code")).upper() == code.strip().upper():
             return {"success": False, "error": "Self-referral is not allowed."}
 
         # 2. Already referred check
         if current_user.get("referred_by"):
             return {"success": False, "error": "You have already claimed a referral bonus."}
 
-        # 3. Find the Giver (the person who owns the code)
+        # 3. Find the Giver
         giver = await self.user_repo.get_by_referral_code(code)
         if not giver:
             return {"success": False, "error": "Invalid referral code."}
 
-        # 4. Process the transaction via Repository
-        # Note: We give 200 PKR to BOTH as you requested
+        # 4. Extract IDs safely
+        # Use .get("_id") to avoid KeyErrors, and ensure they are strings
+        downloader_id = str(current_user.get("_id") or current_user.get("id"))
+        giver_id = str(giver.get("_id"))
+
+        # 5. Process the atomic transaction
         success = await self.user_repo.apply_referral_bonus(
-            downloader_id=str(current_user["_id"]),
-            giver_id=str(giver["_id"]),
+            downloader_id=downloader_id,
+            giver_id=giver_id,
             amount=100.0
         )
 

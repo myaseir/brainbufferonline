@@ -121,14 +121,28 @@ async def matchmaking_endpoint(websocket: WebSocket, token: str = Query(...)):
             pass
     
     finally:
-        if not matched_successfully:
-            removed = await redis_mgr.remove_from_matchmaking(u_id_str)
-            if removed:
-                await user_repo.update_wallet(u_id_str, 50.0)
-                logger.info(f"Refunded 50 PKR to {u_id_str}")
-        
+        # PROFESSIONAL FIX: Ensure the lock is released first
         await redis_release_lock(u_id_str)
-        try:
-            await websocket.close()
-        except:
-            pass
+        
+        # If we didn't confirm a successful match, we MUST attempt a refund
+        if not matched_successfully:
+            try:
+                # Attempt to remove from pool
+                removed = await redis_mgr.remove_from_matchmaking(u_id_str)
+                
+                # Check for a "ghost" notification if removal failed
+                notif = await asyncio.to_thread(redis_client.get, f"notify:{u_id_str}")
+                
+                # If they were in the pool OR they were matched but never played
+                if removed or notif:
+                    await user_repo.update_wallet(u_id_str, 50.0)
+                    if notif:
+                        await asyncio.to_thread(redis_client.delete, f"notify:{u_id_str}")
+                    logger.info(f"✅ Emergency Refund for {u_id_str} after WebSocket Error")
+                else:
+                    # Final Fallback: If we deducted but can't find them in Redis, 
+                    # they are entitled to a refund.
+                    await user_repo.update_wallet(u_id_str, 50.0)
+                    logger.warning(f"🚨 Forced Refund for {u_id_str} due to state mismatch")
+            except Exception as refund_err:
+                logger.error(f"❌ CRITICAL: Refund failed during cleanup: {refund_err}")

@@ -32,15 +32,15 @@ const ReferralCard = ({ user, onUpdateUser }) => {
 const shareToWhatsApp = () => {
   const referralCode = user?.referral_code || "MYCODE";
   
-  // Structured to highlight the 200 PKR immediately
+  // Structured to highlight the 100 PKR immediately
   const message = 
-    `🔥 *EARN 200 PKR INSTANTLY!* 💰\n\n` +
+    `🔥 *EARN 100 PKR INSTANTLY!* 💰\n\n` +
     `I'm using *BrainBuffer* to sharpen my mind and earn real cash. 🧠✨\n\n` +
     `1️⃣ Download the app below\n` +
     `2️⃣ Enter my code: *${referralCode}*\n` +
-    `3️⃣ Get *200 PKR* added to your wallet immediately! 🎁\n\n` +
+    `3️⃣ Get *100 PKR* added to your wallet immediately! 🎁\n\n` +
     `🚀 *Download Link:* \n` +
-    `https://brainbufferonline.vercel.app\n\n` +
+    `https://brainbufferofficial.com\n\n` +
     `_Play. Sharpen. Earn._ 🇵🇰`;
 
   const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
@@ -62,7 +62,7 @@ const shareToWhatsApp = () => {
       });
       const data = await res.json();
       if (res.ok) {
-        toast.success("Bonus Claimed! +200 PKR");
+        toast.success("Bonus Claimed! +100 PKR");
         if (onUpdateUser) onUpdateUser();
         setClaimCode('');
       } else {
@@ -88,7 +88,7 @@ const shareToWhatsApp = () => {
             </div>
             <h2 className="text-2xl font-bold text-slate-800">Refer & Earn</h2>
             <p className="text-slate-500 text-sm leading-relaxed">
-              Share your code with friends. You both get <span className="font-bold text-emerald-600">200 PKR</span> when they join!
+              Share your code with friends. You both get <span className="font-bold text-emerald-600">100 PKR</span> when they join!
             </p>
           </div>
 

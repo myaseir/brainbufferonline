@@ -82,16 +82,25 @@ async def request_withdrawal(data: WithdrawalRequest, current_user: dict = Depen
 @router.post("/referral/claim")
 async def claim_bonus(payload: dict, current_user = Depends(get_current_user)):
     """
-    Exposes the 200 PKR referral reward logic to the frontend.
+    Exposes the 100 PKR referral reward logic to the frontend.
     """
     code = payload.get("code")
     if not code:
         raise HTTPException(status_code=400, detail="Referral code is required")
         
     wallet_service = WalletService()
+    
+    # 🚀 TIP: current_user from get_current_user is a dict. 
+    # Ensure it doesn't contain raw ObjectIds before passing if your service doesn't handle them.
     result = await wallet_service.claim_referral_bonus(current_user, code)
     
-    if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["error"])
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Claim failed"))
         
-    return result
+    # ✅ Return a clean dictionary. 
+    # Avoid returning 'current_user' directly in the response if it has ObjectIds.
+    return {
+        "status": "success",
+        "message": result.get("message", "Bonus claimed successfully!"),
+        "new_balance": current_user.get("wallet_balance", 0) + 100.0 if result.get("success") else current_user.get("wallet_balance")
+    }

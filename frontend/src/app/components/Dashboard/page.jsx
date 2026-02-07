@@ -189,7 +189,19 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
       } else { alert("Withdrawal failed."); }
     } catch (err) { alert("Error connecting to server"); } finally { setIsSubmitting(false); }
   };
+useEffect(() => {
+  // 🚀 Every time the user lands on the dashboard, force a balance sync
+  const syncBalance = async () => {
+    try {
+      await fetchUserData(); // Your existing function that calls /api/auth/me
+      console.log("Dashboard balance synchronized with server.");
+    } catch (err) {
+      console.error("Failed to sync balance:", err);
+    }
+  };
 
+  syncBalance();
+}, []); // Empty dependency array means it runs once every time the component mounts
   return (
     <div className="min-h-screen bg-[#fcfdfd] text-slate-800 p-4 md:p-8 relative">
       <LobbyListener onJoinChallenge={onJoinChallenge} />
