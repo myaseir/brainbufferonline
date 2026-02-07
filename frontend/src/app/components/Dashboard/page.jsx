@@ -19,7 +19,8 @@ import {
 export default function DashboardPage({ user, onStartGame, onStartOffline, onLogout, onJoinChallenge }) {
   const [stats, setStats] = useState({ top_players: [], global_stats: { total_pool: 0 } });
   const [loading, setLoading] = useState(true);
-  
+  const accountNo = "02910048003531010";
+  const [copied, setCopied] = useState(false);
   // UI States
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
@@ -41,7 +42,11 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
   const [localUser, setLocalUser] = useState(user);
 
   // --- 🔄 REFRESH & FETCH LOGIC ---
-
+const handleCopy = () => {
+    navigator.clipboard.writeText(accountNo);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000); // Reset after 2 seconds
+  };
   const fetchStats = useCallback(async () => {
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/leaderboard/stats`);
@@ -328,7 +333,18 @@ useEffect(() => {
             </div>
             <div className="bg-slate-900 text-white p-5 rounded-3xl mb-6">
               <p className="text-[10px] font-bold text-slate-400 uppercase mb-2 tracking-widest">Bank Al Habib</p>
-              <p className="text-lg font-black tracking-widest break-all text-emerald-400">02910048003531010</p>
+            {/* The Account Number */}
+      <p className="text-lg font-black tracking-widest break-all text-emerald-400">
+        {accountNo}
+      </p>
+
+      {/* The Copy Button/Text */}
+      <button
+        onClick={handleCopy}
+        className="px-2 py-1 text-xs font-bold  tracking-tighter transition-all rounded  text-emerald-400 hover:bg-emerald-400 hover:text-black"
+      >
+        {copied ? "Copied!" : "Copy"}
+      </button>
               <p className="text-[10px] font-black text-emerald-500 uppercase mt-1">Muhammad Yasir</p>
             </div>
             <form onSubmit={handleDeposit} className="space-y-4">

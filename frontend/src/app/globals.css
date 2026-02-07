@@ -2,7 +2,6 @@
 
 /* --- Tailwind v4 Theme Configuration --- */
 @theme {
-  /* This replaces your tailwind.config.js settings */
   --color-brand-blue-50: #f8fbff;
   --color-brand-blue-100: #eef7ff;
   --color-brand-blue-500: #3b82f6;
@@ -23,8 +22,8 @@
   body {
     @apply bg-[#f0f2f5] text-slate-900 antialiased;
     margin: 0;
-    min-height: 100dvh;
-    /* Use dynamic viewport height for better mobile support */
+    /* Back to min-height so other pages can scroll normally */
+    min-height: 100dvh; 
   }
 
   html {
@@ -33,16 +32,26 @@
 }
 
 /* --- Custom Utility Classes --- */
+
+/* This class now acts as a "Fullscreen Lock". 
+   Apply this ONLY to the main container of your Bubble Game.
+*/
 @utility game-stage {
+  position: fixed;   /* Fixes the game to the viewport */
+  top: 0;
+  left: 0;
+  width: 100vw;
   height: 100dvh;
-  overflow: hidden;
-  position: relative;
+  overflow: hidden;  /* Disables scrolling within the game */
+  touch-action: none; /* Prevents mobile swipe-to-scroll/refresh */
+  z-index: 50;       /* Keeps it above your dashboard content */
+  background: inherit; 
 }
 
-/* If you still need the .loaderOverlay or .authCard from previous steps */
 @utility loader-overlay {
   @apply fixed inset-0 z-50 flex items-center justify-center bg-slate-900/20 backdrop-blur-sm;
 }
+
 @keyframes shine {
   0% { transform: translateX(-150%) skewX(-25deg); }
   100% { transform: translateX(150%) skewX(-25deg); }
@@ -51,7 +60,7 @@
 .reflect-effect {
   position: relative;
   overflow: hidden;
-  mask-image: linear-gradient(black, black); /* Keeps the glint inside the icon shape */
+  mask-image: linear-gradient(black, black);
 }
 
 .reflect-effect::after {
