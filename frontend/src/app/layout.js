@@ -17,7 +17,11 @@ export const viewport = {
 export const metadata = {
   metadataBase: new URL('https://www.brainbufferofficial.com'),
   
-  // Front-loaded keywords in title for #1 Ranking
+  // ✅ GOOGLE VERIFICATION ADDED HERE
+  verification: {
+    google: 'm9GIv5f_ycGxI0AIUwyad2TRbG42ouIXysEBkR_vIdA',
+  },
+
   title: {
     default: 'BrainBuffer | Earn Real Money Memory Game & Brain Training',
     template: '%s | BrainBuffer Arena',
@@ -39,7 +43,6 @@ export const metadata = {
   creator: 'Muhammad Yasir',
   applicationName: 'BrainBuffer',
 
-  // OpenGraph (Social Media Previews)
   openGraph: {
     title: 'BrainBuffer - Play, Compete, and Earn Real Cash!',
     description: 'Master your memory. Battle players worldwide and withdraw your winnings instantly.',
@@ -47,7 +50,7 @@ export const metadata = {
     siteName: 'BrainBuffer Arena',
     images: [
       {
-        url: '/og-image.jpg', // Ensure this 1200x630 image is in your /public folder
+        url: '/og-image.jpg',
         width: 1200,
         height: 630,
         alt: 'BrainBuffer Gameplay & Earning Dashboard',
@@ -57,7 +60,6 @@ export const metadata = {
     type: 'website',
   },
 
-  // Twitter/X Card
   twitter: {
     card: 'summary_large_image',
     title: 'BrainBuffer | The Ultimate Earning Memory Game',
@@ -65,7 +67,6 @@ export const metadata = {
     images: ['/og-image.jpg'],
   },
 
-  // Robot Instructions
   robots: {
     index: true,
     follow: true,
@@ -83,11 +84,9 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
-        {/* Helps Google understand this is the primary version of the site */}
         <link rel="canonical" href="https://www.brainbufferofficial.com" />
       </head>
       <body className={`${inter.className} antialiased`}>
-        {/* ✅ Protects all routes including Dashboard and Game */}
         <UpdateGuard>
           {children}
         </UpdateGuard>
