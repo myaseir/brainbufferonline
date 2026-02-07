@@ -99,6 +99,7 @@ class MatchmakingService:
                         "bet_amount": "50.0"
                     })
                     redis_client.expire(match_key, 600)
+                    redis_client.sadd("pending_bot_matches", match_id)
 
                     return {
                         "status": "MATCHED",

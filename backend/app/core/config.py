@@ -27,12 +27,12 @@ class Settings(BaseSettings):
 
     # 5. Brevo Email Configuration
     BREVO_API_KEY: str = Field(default="") 
-    SENDER_EMAIL: str = Field(default="support@glacialabs.com")
-    SENDER_NAME: str = Field(default="Glacia Labs")
+    SENDER_EMAIL: str = Field(default="support@brainbufferofficial.com")
+    SENDER_NAME: str = Field(default="Brain Buffer Support")
     
     LATEST_MOBILE_VERSION: str = Field(default="2.0.0")
     MIN_REQUIRED_MOBILE_VERSION: str = Field(default="1.0.0")
-    MOBILE_DOWNLOAD_URL: str = Field(default="https://glacialabs.com/download")
+    MOBILE_DOWNLOAD_URL: str = Field(default="https://www.brainbufferofficial.com")
 
     # 6. Environment Config
     model_config = SettingsConfigDict(

@@ -244,47 +244,65 @@ class UserRepository:
     async def get_referral_leaderboard(self, skip: int = 0, limit: int = 10):
         """
         Groups users by who referred them, counts them, and joins with user details.
+        Handles string/ObjectId conversion to prevent 500 errors.
         """
         pipeline = [
-            # 1. Filter: Only process users who were actually referred by someone
+            # 1. Match only users who have been referred
             {"$match": {"referred_by": {"$ne": None}}}, 
             
-            # 2. Group: Count how many times each 'Giver' ID appears
+            # 2. Group by the Referrer ID and count referrals
             {"$group": {
                 "_id": "$referred_by", 
                 "referral_count": {"$sum": 1}
             }},
+
+            # 3. Convert ID string to ObjectId for the join stage
+            {"$addFields": {
+                "referrer_oid": {
+                    "$cond": [
+                        {"$eq": [{"$type": "$_id"}, "string"]},
+                        {"$toObjectId": "$_id"},
+                        "$_id"
+                    ]
+                }
+            }},
             
-            # 3. Sort: Highest referral counts at the top
+            # 4. Sort by count, Skip, and Limit (Pagination)
             {"$sort": {"referral_count": -1}}, 
-            
-            # 4. Pagination: Skip and Limit for the "Load More" feature
             {"$skip": skip},
             {"$limit": limit},
             
-            # 5. Join: Pull the Giver's username and email from the users collection
+            # 5. Join with the 'users' collection
             {"$lookup": {
                 "from": "users",
-                "localField": "_id",
+                "localField": "referrer_oid",
                 "foreignField": "_id",
                 "as": "user_info"
             }},
             
-            # 6. Flatten the joined data
-            {"$unwind": "$user_info"},
+            # 6. Flatten user_info (preserves document even if lookup fails)
+            {"$unwind": {
+                "path": "$user_info",
+                "preserveNullAndEmptyArrays": False 
+            }},
             
-            # 7. Project: Format the final data for the Admin UI
+            # 7. Final Projection for Admin UI
             {"$project": {
+                "_id": {"$toString": "$user_info._id"},
                 "username": "$user_info.username",
                 "email": "$user_info.email",
                 "referral_count": 1,
                 "total_earned": {"$multiply": ["$referral_count", 100.0]}
             }}
         ]
+        
         try:
+            # Execute aggregation
             cursor = self.collection.aggregate(pipeline)
-            return await cursor.to_list(length=limit)
+            results = await cursor.to_list(length=limit)
+            return results
         except Exception as e:
-            logger.error(f"Error in referral leaderboard: {e}")
+            # Logs will now show up in your uvicorn terminal
+            logger.error(f"CRITICAL ERROR in referral leaderboard: {str(e)}")
             return []
     

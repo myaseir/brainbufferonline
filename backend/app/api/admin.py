@@ -316,14 +316,12 @@ async def get_match_audit(match_id: str, admin: dict = Depends(get_current_admin
         "winner_id": str(audit_data["winner_id"]) if audit_data.get("winner_id") else None
     }
 
-@router.get("/referral-leaderboard") # This becomes /api/admin/referral-leaderboard
+@router.get("/referral-leaderboard")
 async def admin_referral_leaderboard(
     skip: int = Query(0, ge=0), 
-    limit: int = Query(10, le=50)
+    limit: int = Query(10, le=50),
+    admin: dict = Depends(get_current_admin) # Add this line for security
 ):
-    """
-    Fetch the top earners from referrals for the admin dashboard.
-    """
     repo = UserRepository()
     data = await repo.get_referral_leaderboard(skip=skip, limit=limit)
     return {"status": "success", "data": data}
