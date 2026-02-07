@@ -26,6 +26,15 @@ export const metadata = {
     default: 'BrainBuffer | Earn Real Money Memory Game & Brain Training',
     template: '%s | BrainBuffer Arena',
   },
+  icons: {
+    icon: [
+      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon-48x48.png', sizes: '48x48', type: 'image/png' }, // ADD THIS for Google Search
+    ],
+    apple: [
+      { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }, // For iOS users
+    ],
+  },
   
   description: 'The #1 competitive memory game to earn real cash. Train your cognitive speed, win ranked matches, and withdraw earnings instantly via Bank or Easypaisa.',
   
