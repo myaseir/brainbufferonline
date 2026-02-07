@@ -1,8 +1,26 @@
 import LegalLayout from '../components/LegalLayout';
-
+export const metadata = {
+  title: 'Terms of Service | BrainBuffer Skill-Based Arena',
+  description: 'Official terms and conditions for BrainBuffer. Understand the skill-based legal framework under Section 12 of the Public Gambling Act and our eSports fair play policies.',
+};
 export default function TermsPage() {
   return (
     <LegalLayout title="Terms & Conditions of Service">
+      <script
+  type="application/ld+json"
+  dangerouslySetInnerHTML={{
+    __html: JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "WebPage",
+      "name": "Terms of Service",
+      "description": "Legal terms for BrainBuffer eSports platform regarding skill-based competition and financial protocols.",
+      "publisher": {
+        "@type": "Organization",
+        "name": "Brain Buffer"
+      }
+    })
+  }}
+/>
       <div className="space-y-12 text-slate-600 font-medium leading-relaxed">
         
         {/* 1. JURIDICAL & SHARIAH CLASSIFICATION */}
@@ -87,8 +105,9 @@ export default function TermsPage() {
         <section>
           <h2 className="text-slate-900 font-black uppercase tracking-tight text-lg mb-4">6. Amendments to Service</h2>
           <p>
-            BrainBuffer is a dynamic eSports environment. We reserve the right to modify entry fees, commission percentages, and match rules at any time to ensure the sustainability of the platform. Continued use of the "Commander Profile" after such changes constitutes your legal acceptance of the updated terms.
-          </p>
+  BrainBuffer is a dynamic eSports environment. We reserve the right to modify entry fees and match rules 
+  on our <a href="/" className="text-green-600 underline">Official Arena Landing Page</a> to ensure platform sustainability.
+</p>
         </section>
 
         {/* 7. DISPUTE RESOLUTION */}
@@ -105,7 +124,13 @@ export default function TermsPage() {
             BrainBuffer is not responsible for losses incurred due to user-side internet instability, device failure, or electricity outages. Players are advised to check the <strong>Network Guard</strong> before entering a ranked match.
           </p>
         </section>
-
+<section>
+  <h2 className="text-slate-900 font-black uppercase tracking-tight text-lg mb-4">8. Acceptance</h2>
+  <p>
+    By creating a Commander Profile, you confirm you are at least 18 years of age and agree to these terms. 
+    For legal inquiries, contact <strong>brainbufferofficial@gmail.com</strong>.
+  </p>
+</section>
         {/* LEGAL QUOTE BLOCK */}
         <div className="p-8 bg-slate-900 rounded-[2.5rem] shadow-2xl">
           <p className="text-white font-bold mb-2 uppercase tracking-widest text-[10px]">Statutory Declaration</p>
@@ -116,5 +141,6 @@ export default function TermsPage() {
 
       </div>
     </LegalLayout>
+    
   );
 }

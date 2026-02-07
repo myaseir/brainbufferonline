@@ -148,6 +148,10 @@ const [acceptedTerms, setAcceptedTerms] = useState(false);
     })
   }}
 />
+<div className="sr-only">
+  <h2>The Best Skill-Based Earning Game in Pakistan</h2>
+  <p>BrainBuffer is a competitive memory arena where players train their brains and earn real cash rewards through Easypaisa and JazzCash.</p>
+</div>
       {/* 1. HERO & AUTH SECTION */}
       <section className="min-h-[80vh] md:min-h-screen flex flex-col items-center justify-center p-4 relative overflow-hidden">
         {/* Background Decorative Glows */}
@@ -307,7 +311,7 @@ const [acceptedTerms, setAcceptedTerms] = useState(false);
           className="absolute bottom-4 md:bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap- md:gap-2 cursor-pointer z-20 group"
         >
            <span className="text-[8px] md:text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 group-hover:text-green-500 transition-colors">Legal & App</span>
-           <ChevronDown className="animate-bounce text-green-500" size={30} />
+           <ChevronDown className="animate-bounce text-green-500" size={20} />
         </div>
       </section>
 

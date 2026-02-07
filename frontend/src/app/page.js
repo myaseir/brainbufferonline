@@ -86,6 +86,13 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#fcfdfd] select-none text-slate-800">
+      <h1 className="sr-only">BrainBuffer | The Competitive Memory Training Arena for Real Rewards</h1>
+      <noscript>
+        <div className="fixed inset-0 z-[10000] bg-white flex flex-col items-center justify-center p-10 text-center">
+          <h2 className="text-2xl font-black text-slate-900 uppercase">BrainBuffer: The Best Earning Memory Game</h2>
+          <p className="text-slate-500 mt-4">Please enable JavaScript to join the arena and start earning real cash.</p>
+        </div>
+      </noscript>
       <Toaster position="top-center" containerStyle={{ zIndex: 99999 }} />
       
       {/* ---------------- LOGIC LAYER ---------------- */}
