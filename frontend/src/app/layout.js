@@ -17,28 +17,37 @@ export const viewport = {
 export const metadata = {
   metadataBase: new URL('https://www.brainbufferofficial.com'),
   
-  // ✅ GOOGLE VERIFICATION ADDED HERE
+  // ✅ Proper Canonical Handling for Next.js 14
+  alternates: {
+    canonical: '/',
+  },
+
+  // ✅ GOOGLE VERIFICATION
   verification: {
     google: 'm9GIv5f_ycGxI0AIUwyad2TRbG42ouIXysEBkR_vIdA',
   },
 
   title: {
-    default: 'BrainBuffer | Earn Real Money Memory Game & Brain Training',
+    default: 'BrainBuffer | Earn Real Money Memory Game by Glacia Labs',
     template: '%s | BrainBuffer Arena',
   },
+  
   icons: {
     icon: [
+      { url: '/favicon.ico' }, // Standard Shortcut Icon
       { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
-      { url: '/favicon-48x48.png', sizes: '48x48', type: 'image/png' }, // ADD THIS for Google Search
+      { url: '/favicon-48x48.png', sizes: '48x48', type: 'image/png' }, // Critical for Google Search visibility
     ],
     apple: [
-      { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }, // For iOS users
+      { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
     ],
   },
   
-  description: 'The #1 competitive memory game to earn real cash. Train your cognitive speed, win ranked matches, and withdraw earnings instantly via Bank or Easypaisa.',
+  description: 'The #1 competitive memory game to earn real cash. Master your cognitive speed, win ranked matches, and withdraw earnings instantly via Bank or Easypaisa. Powered by Glacia Labs.',
   
   keywords: [
+    'BrainBuffer Glacia Labs',
+    'Zadains memory game',
     'earning games 2026', 
     'earn money online Pakistan', 
     'real cash memory game', 
@@ -50,6 +59,7 @@ export const metadata = {
 
   authors: [{ name: 'Muhammad Yasir', url: 'https://www.brainbufferofficial.com' }],
   creator: 'Muhammad Yasir',
+  publisher: 'Glacia Labs',
   applicationName: 'BrainBuffer',
 
   openGraph: {
@@ -92,9 +102,10 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <head>
-        <link rel="canonical" href="https://www.brainbufferofficial.com" />
-      </head>
+      {/* NOTE: We removed the manual <head> canonical link. 
+          Next.js now handles this via the 'alternates' metadata above 
+          to avoid duplicate tag issues.
+      */}
       <body className={`${inter.className} antialiased`}>
         <UpdateGuard>
           {children}

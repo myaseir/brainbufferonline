@@ -7,20 +7,26 @@ export default function sitemap(): MetadataRoute.Sitemap {
     {
       url: baseUrl,
       lastModified: new Date(),
-      changeFrequency: 'always', // Tells Google this page is dynamic and high-priority
-      priority: 1.0,           // Absolute highest priority
+      changeFrequency: 'daily', // 🚀 Better for dynamic game apps
+      priority: 1.0,
+    },
+    {
+      url: `${baseUrl}/leaderboard`, // 🏆 Helps your top players get indexed
+      lastModified: new Date(),
+      changeFrequency: 'daily',
+      priority: 0.8,
     },
     {
       url: `${baseUrl}/terms`,
-      lastModified: new Date(),
+      lastModified: '2026-02-08', // 📅 Better to use the actual last edit date
       changeFrequency: 'monthly',
-      priority: 0.3,           // Lower priority so it doesn't compete with Home
+      priority: 0.3,
     },
     {
       url: `${baseUrl}/privacy`,
-      lastModified: new Date(),
+      lastModified: '2026-02-08',
       changeFrequency: 'monthly',
-      priority: 0.3,           // Lower priority
+      priority: 0.3,
     },
   ];
 }
