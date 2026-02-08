@@ -136,8 +136,8 @@ async def game_websocket_endpoint(
         last_sync_op_score = -1
 
         while True:
-            await asyncio.sleep(0.5) 
-            
+            await asyncio.sleep(2.0) 
+            # yasir
             raw_data = await asyncio.to_thread(redis_client.hgetall, match_key)
             match_data = {to_str(k): to_str(v) for k, v in raw_data.items()}
             
