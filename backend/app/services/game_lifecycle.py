@@ -41,7 +41,7 @@ async def wait_for_match_ready(match_id: str, user_id: str, timeout: int = 30):
                 return json.loads(rounds_json), opponent_name, opponent_id
 
         # 3. Adaptive polling: Wait 1s between checks to save Upstash quota
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(2.0)
         
     raise TimeoutError("Match initialization timed out waiting for opponent.")
 
