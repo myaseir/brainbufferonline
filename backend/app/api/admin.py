@@ -7,13 +7,14 @@ from app.db.redis import redis_client
 from bson import ObjectId
 from datetime import datetime, timezone
 import json
+from app.services.auth_service import AuthService
 from app.services.lobby_manager import lobby_manager
 from app.repositories.match_repo import MatchRepository
 router = APIRouter()
 user_repo = UserRepository()
 wallet_service = WalletService()
 match_repo = MatchRepository()
-
+auth_service = AuthService()
 # --- 📊 ANALYTICS ---
 @router.get("/revenue/today")
 async def get_revenue(admin: dict = Depends(get_current_admin)):
@@ -99,44 +100,21 @@ async def get_health(admin: dict = Depends(get_current_admin)):
 # --- 👥 USER MANAGEMENT (MISSING IN YOUR CODE) ---
 @router.get("/users")
 async def get_users(
-    page: int = 1, 
+    page: int = Query(1, ge=1), 
     search: str = "", 
     admin: dict = Depends(get_current_admin)
 ):
-    db = user_repo.collection.database
-    limit = 20
-    skip = (page - 1) * limit
+    """
+    Coordinates with AuthService to provide paginated and 
+    searchable data for the UserTable.tsx component.
+    """
+    # Use the service instance initialized at the top of your file
+    result = await auth_service.get_all_users_for_admin(
+        page=page, 
+        search=search
+    )
     
-    query = {}
-    if search:
-        query = {
-            "$or": [
-                {"email": {"$regex": search, "$options": "i"}},
-                {"username": {"$regex": search, "$options": "i"}}
-            ]
-        }
-
-    # 1. Get the total count of users matching the query
-    total_users = await db["users"].count_documents(query)
-
-    # 2. Calculate total pages (e.g., 45 users / 20 limit = 3 pages)
-    total_pages = (total_users + limit - 1) // limit
-
-    # 3. Fetch the specific slice of users
-    users_cursor = db["users"].find(query).skip(skip).limit(limit).sort("created_at", -1)
-    users = await users_cursor.to_list(limit)
-    
-    # Serialize ObjectId
-    for u in users:
-        u["_id"] = str(u["_id"])
-        
-    # 4. Return users AND the pagination metadata
-    return {
-        "users": users,
-        "total_pages": total_pages,
-        "total_users": total_users,
-        "current_page": page
-    }
+    return result
 # --- 💰 DEPOSITS ---
 @router.get("/deposits/pending")
 async def get_pending_deposits(admin: dict = Depends(get_current_admin)):
@@ -320,8 +298,15 @@ async def get_match_audit(match_id: str, admin: dict = Depends(get_current_admin
 async def admin_referral_leaderboard(
     skip: int = Query(0, ge=0), 
     limit: int = Query(10, le=50),
-    admin: dict = Depends(get_current_admin) # Add this line for security
+    admin: dict = Depends(get_current_admin)
 ):
-    repo = UserRepository()
-    data = await repo.get_referral_leaderboard(skip=skip, limit=limit)
-    return {"status": "success", "data": data}
+    # It is better to use the WalletService which we updated earlier
+    from app.services.wallet_service import WalletService
+    wallet_service = WalletService()
+    
+    result = await wallet_service.get_admin_referral_stats(
+        skip=skip, 
+        limit=limit
+    )
+    
+    return result

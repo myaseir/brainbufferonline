@@ -117,3 +117,17 @@ class WalletService:
             return {"success": True, "message": "100 PKR added to both accounts!"}
         
         return {"success": False, "error": "Transaction failed. Please try again."}
+    
+    async def get_admin_referral_stats(self, skip: int = 0, limit: int = 10):
+        """
+        Fetches the referral leaderboard data for the Admin UI.
+        """
+        leaderboard_data = await self.user_repo.get_referral_leaderboard(
+            skip=skip, 
+            limit=limit
+        )
+        
+        return {
+            "status": "success",
+            "data": leaderboard_data
+        }

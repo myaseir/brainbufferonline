@@ -305,4 +305,86 @@ class UserRepository:
             # Logs will now show up in your uvicorn terminal
             logger.error(f"CRITICAL ERROR in referral leaderboard: {str(e)}")
             return []
+        
+    async def get_all_users(self, page: int = 1, limit: int = 10, search: str = ""):
+        """
+        Supports UserTable.tsx with pagination and search.
+        Returns (users_list, total_pages)
+        """
+        skip = (page - 1) * limit
+        query = {}
+        
+        if search:
+            query = {
+                "$or": [
+                    {"username": {"$regex": search, "$options": "i"}},
+                    {"email": {"$regex": search, "$options": "i"}}
+                ]
+            }
+
+        try:
+            total_count = await self.collection.count_documents(query)
+            total_pages = (total_count + limit - 1) // limit
+
+            cursor = self.collection.find(query).skip(skip).limit(limit)
+            users = await cursor.to_list(length=limit)
+
+            # ✅ THE FIX: Manually convert ObjectId to string for every user
+            for u in users:
+                u["_id"] = str(u["_id"])
+                # Also handle 'referred_by' if it exists and is an ObjectId
+                if u.get("referred_by"):
+                    u["referred_by"] = str(u["referred_by"])
+            
+            return users, total_pages
+        except Exception as e:
+            logger.error(f"Error fetching users: {e}")
+            return [], 1
+
+    async def get_referral_leaderboard(self, skip: int = 0, limit: int = 10):
+        """
+        Updates the existing leaderboard method to ensure robust ID handling 
+        and matching the field names expected by ReferralLeaderboard.jsx
+        """
+        pipeline = [
+            {"$match": {"referred_by": {"$ne": None}}}, 
+            {"$group": {
+                "_id": "$referred_by", 
+                "referral_count": {"$sum": 1}
+            }},
+            {"$addFields": {
+                "referrer_oid": {
+                    "$cond": [
+                        {"$eq": [{"$type": "$_id"}, "string"]},
+                        {"$toObjectId": "$_id"},
+                        "$_id"
+                    ]
+                }
+            }},
+            {"$sort": {"referral_count": -1}}, 
+            {"$skip": skip},
+            {"$limit": limit},
+            {"$lookup": {
+                "from": "users",
+                "localField": "referrer_oid",
+                "foreignField": "_id",
+                "as": "user_info"
+            }},
+            {"$unwind": "$user_info"},
+            {"$project": {
+                "_id": {"$toString": "$user_info._id"},
+                "username": "$user_info.username",
+                "email": "$user_info.email",
+                "referral_count": 1,
+                # Assuming 100 PKR per referral bonus
+                "total_earned": {"$multiply": ["$referral_count", 100]}
+            }}
+        ]
+        
+        try:
+            cursor = self.collection.aggregate(pipeline)
+            return await cursor.to_list(length=limit)
+        except Exception as e:
+            logger.error(f"Referral Leaderboard Error: {e}")
+            return []
     

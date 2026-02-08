@@ -96,3 +96,21 @@ class AuthService:
         redis_client.set(f"user:email:{email}", serialized_new_user, ex=3600)
         
         return user_id
+    
+    async def get_all_users_for_admin(self, page: int = 1, search: str = ""):
+        """
+        Coordinates with UserRepository to provide paginated and 
+        searchable data for the UserTable.tsx component.
+        """
+        # We pass the logic down to the repo you just updated
+        users, total_pages = await self.repo.get_all_users(
+            page=page, 
+            limit=10, 
+            search=search
+        )
+        
+        return {
+            "users": users,
+            "total_pages": total_pages,
+            "current_page": page
+        }
