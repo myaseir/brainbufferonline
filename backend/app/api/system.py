@@ -45,7 +45,7 @@ async def get_system_status():
     return {
         "maintenance": is_maintenance,
         "message": "BrainBuffer is undergoing a scheduled integrity audit.",
-        "estimated_time": "30-60 minutes"
+        # "estimated_time": "30-60 minutes"
     }
 
 # --- 🔐 ADMIN ROUTE (Used by Admin Panel) ---
