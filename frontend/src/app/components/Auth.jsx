@@ -356,12 +356,12 @@ const [acceptedTerms, setAcceptedTerms] = useState(false);
     className="w-fit min-w-[240px] text-center bg-slate-900 text-white px-8 md:px-12 py-5 rounded-2xl font-black uppercase tracking-widest text-[10px] md:text-[11px] hover:bg-green-600 transition-all shadow-2xl active:scale-95 flex items-center justify-center gap-3"
   >
     <Smartphone size={16} className="text-green-400" />
-    Download BrainBuffer v4.7
+    Download BrainBuffer v4.8
   </a>
   
   <div className="flex flex-col items-center lg:items-start">
     <p className="text-[9px] md:text-[10px] text-slate-400 font-black uppercase tracking-[0.2em]">
-      Current Build: <span className="text-slate-900">v4.7.0-Stable</span>
+      Current Build: <span className="text-slate-900">v4.8.0-Stable</span>
     </p>
     <p className="text-[9px] md:text-[10px] text-slate-300 font-bold uppercase tracking-widest">
       Size: 25MB • Android 6.0+
