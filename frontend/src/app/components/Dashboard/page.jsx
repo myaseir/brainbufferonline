@@ -312,7 +312,7 @@ useEffect(() => {
               <div className="absolute -right-4 -bottom-4 opacity-[0.03] rotate-12 text-slate-900"><Trophy size={160} /></div>
             </div>
 
-            <ReferralCard user={localUser} onUpdateUser={handleDataUpdate} />
+            {/* <ReferralCard user={localUser} onUpdateUser={handleDataUpdate} /> */}
             <RecentMatches matches={localUser?.recent_matches || []} />
           </div>
 
