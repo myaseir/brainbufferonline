@@ -376,8 +376,8 @@ class UserRepository:
                 "username": "$user_info.username",
                 "email": "$user_info.email",
                 "referral_count": 1,
-                # Assuming 100 PKR per referral bonus
-                "total_earned": {"$multiply": ["$referral_count", 100]}
+                # Assuming 50 PKR per referral bonus
+                "total_earned": {"$multiply": ["$referral_count", 50]}
             }}
         ]
         

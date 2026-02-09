@@ -82,7 +82,7 @@ async def request_withdrawal(data: WithdrawalRequest, current_user: dict = Depen
 @router.post("/referral/claim")
 async def claim_bonus(payload: dict, current_user = Depends(get_current_user)):
     """
-    Exposes the 100 PKR referral reward logic to the frontend.
+    Exposes the 50 PKR referral reward logic to the frontend.
     """
     code = payload.get("code")
     if not code:
@@ -102,5 +102,5 @@ async def claim_bonus(payload: dict, current_user = Depends(get_current_user)):
     return {
         "status": "success",
         "message": result.get("message", "Bonus claimed successfully!"),
-        "new_balance": current_user.get("wallet_balance", 0) + 100.0 if result.get("success") else current_user.get("wallet_balance")
+        "new_balance": current_user.get("wallet_balance", 0) + 50.0 if result.get("success") else current_user.get("wallet_balance")
     }
