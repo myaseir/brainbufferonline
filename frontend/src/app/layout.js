@@ -1,6 +1,7 @@
 import { Inter } from 'next/font/google';
 import './globals.css';
 import UpdateGuard from './components/UpdateGuard';
+import MaintenanceGuard from './components/MaintenanceGuard';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -46,8 +47,8 @@ export const metadata = {
   description: 'The #1 competitive memory game to earn real cash. Master your cognitive speed, win ranked matches, and withdraw earnings instantly via Bank or Easypaisa. Powered by Glacia Labs.',
   
   keywords: [
-    'BrainBuffer Glacia Labs',
-    'Zadains memory game',
+    'Brain Buffer',
+    'memory game',
     'earning games 2026', 
     'earn money online Pakistan', 
     'real cash memory game', 
@@ -107,9 +108,11 @@ export default function RootLayout({ children }) {
           to avoid duplicate tag issues.
       */}
       <body className={`${inter.className} antialiased`}>
+       <MaintenanceGuard>
         <UpdateGuard>
           {children}
         </UpdateGuard>
+        </MaintenanceGuard>
       </body>
     </html>
   );
