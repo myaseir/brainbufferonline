@@ -57,7 +57,7 @@ class RevenueService:
         net_profit = res["total_collected"] - res["total_payout"]
 
         # 🚀 3. Sync back to Redis so next request is instant
-        redis_client.hset(redis_key, mapping={
+        redis_client.hset(redis_key, values={
             "matches": res["total_matches"],
             "draws": res["draws"],
             "collected": res["total_collected"],

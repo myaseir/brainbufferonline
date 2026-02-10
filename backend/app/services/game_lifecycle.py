@@ -121,7 +121,7 @@ async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_sco
         # 5. ✅ UPSTASH FIX: Use direct calls instead of pipeline.exec() to avoid crashes
         # The Upstash SDK handles these high-speed sequential writes very well.
         # ✅ UPSTASH OPTIMIZED: 5 writes in 1 single command
-        redis_client.hset(match_key, mapping={
+        redis_client.hset(match_key, values={
         f"status:{user_id}": "FINISHED",
         f"status:{opponent_id}": "FINISHED",
         "finalized": "true",

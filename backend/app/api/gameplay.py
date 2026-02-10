@@ -65,7 +65,7 @@ async def game_websocket_endpoint(
         pipe = redis_client.pipeline()
         pipe.hset(match_key, f"name:{u_id_str}", username)
         pipe.hset(match_key, f"status:{u_id_str}", "PLAYING")
-        pipe.hset(match_key, f"last_seen:{u_id_str}", time.time())
+        pipe.hset(match_key, f"last_seen:{u_id_str}", str(time.time()))
         pipe.hsetnx(match_key, f"score:{u_id_str}", "0")
         pipe.hincrby(match_key, "active_conns", 1)
         await asyncio.to_thread(pipe.exec)
@@ -75,7 +75,8 @@ async def game_websocket_endpoint(
         
         if is_host:
             game_rounds = generate_fair_game(20)
-            await asyncio.to_thread(redis_client.hset, match_key, "rounds", json.dumps(game_rounds))
+            # Even for single fields, using the positional or 'values' argument is safer
+            await asyncio.to_thread(redis_client.hset, match_key, values={"rounds": json.dumps(game_rounds)})
             await asyncio.to_thread(redis_client.expire, match_key, 600)
             
             signal_data = {
@@ -122,8 +123,8 @@ async def game_websocket_endpoint(
                         continue
                     if data.get("type") == "SCORE_UPDATE":
                         new_score = int(data.get("score", 0))
-                        await asyncio.to_thread(redis_client.hset, match_key, f"score:{u_id_str}", new_score)
-                        await asyncio.to_thread(redis_client.hset, match_key, f"last_seen:{u_id_str}", time.time())
+                        await asyncio.to_thread(redis_client.hset, match_key, values={f"score:{u_id_str}": new_score})
+                        await asyncio.to_thread(redis_client.hset, match_key, values={f"last_seen:{u_id_str}": str(time.time())})
                     if data.get("type") == "GAME_OVER":
                         await asyncio.to_thread(redis_client.hset, match_key, f"status:{u_id_str}", "FINISHED")
             except:

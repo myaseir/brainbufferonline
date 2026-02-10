@@ -92,7 +92,7 @@ class MatchmakingService:
                     await self.match_repo.create_match_record(match_id, bot_id, user_id, 50.0)
                     
                     match_key = f"match:live:{match_id}"
-                    redis_client.hset(match_key, mapping={
+                    redis_client.hset(match_key, values={
                         "p1_id": user_id,
                         "p2_id": bot_id,
                         "status": "CREATED",
