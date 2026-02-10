@@ -102,5 +102,6 @@ async def claim_bonus(payload: dict, current_user = Depends(get_current_user)):
     return {
         "status": "success",
         "message": result.get("message", "Bonus claimed successfully!"),
-        "new_balance": current_user.get("wallet_balance", 0) + 50.0 if result.get("success") else current_user.get("wallet_balance")
+        # The balance for this user DOES NOT change, so just return the current value.
+        "new_balance": current_user.get("wallet_balance", 0)
     }

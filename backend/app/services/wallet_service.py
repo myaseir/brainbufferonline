@@ -114,7 +114,7 @@ class WalletService:
         )
 
         if success:
-            return {"success": True, "message": "50 PKR added to both accounts!"}
+            return {"success": True, "message": "Referral successful! Your friend has been rewarded."}
         
         return {"success": False, "error": "Transaction failed. Please try again."}
     
