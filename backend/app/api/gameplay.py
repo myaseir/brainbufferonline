@@ -165,15 +165,12 @@ async def game_websocket_endpoint(
                 await finalize_match(websocket, match_id, u_id_str, opponent_id, "NORMAL", my_score, op_score, opponent_name, user_repo)
                 continue
             
-            elif op_status == "FINISHED" and my_status == "PLAYING" and my_score > op_score:
-                await finalize_match(websocket, match_id, u_id_str, opponent_id, "NORMAL", my_score, op_score, opponent_name, user_repo)
-                continue
+            
 
-            elif my_status == "FINISHED" and op_status == "PLAYING" and op_score > my_score:
-                await finalize_match(websocket, match_id, u_id_str, opponent_id, "NORMAL", my_score, op_score, opponent_name, user_repo)
-                continue
+        
 
             # C. Score Syncing
+            # This keeps both players updated on each other's scores in real-time.
             if my_score != last_sync_score or op_score != last_sync_op_score:
                 await websocket.send_json({
                     "type": "SYNC_STATE",

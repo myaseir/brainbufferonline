@@ -88,15 +88,24 @@ async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_sco
             summary_op = f"Match {status_op}"
 
         # 💰 Execute DB Transaction (Wallet + History)
-        payout_success = await user_repo.process_match_payout(
-            match_id=match_id,
-            winner_id=winner_id,
-            player1_id=user_id,
-            player2_id=opponent_id,
-            p1_score=f_my_score,
-            p2_score=f_op_score,
-            is_draw=is_draw
-        )
+        payout_task = asyncio.create_task(
+            user_repo.process_match_payout(
+                match_id=match_id,
+                winner_id=winner_id,
+                player1_id=user_id,
+                player2_id=opponent_id,
+                p1_score=f_my_score,
+                p2_score=f_op_score,
+                is_draw=is_draw
+        )   )
+        
+        def handle_payout_result(task):
+            try:
+                task.result()
+            except Exception as e:
+                logger.error(f"❌ Background Payout Failed for {match_id}: {e}")
+                
+        payout_task.add_done_callback(handle_payout_result)
 
         # 4. Results Payload
         results = {
@@ -121,13 +130,16 @@ async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_sco
         # 5. ✅ UPSTASH FIX: Use direct calls instead of pipeline.exec() to avoid crashes
         # The Upstash SDK handles these high-speed sequential writes very well.
         # ✅ UPSTASH OPTIMIZED: 5 writes in 1 single command
-        redis_client.hset(match_key, values={
-        f"status:{user_id}": "FINISHED",
-        f"status:{opponent_id}": "FINISHED",
-        "finalized": "true",
-        f"final_result:{user_id}": json.dumps(results[user_id]),
-        f"final_result:{opponent_id}": json.dumps(results[opponent_id])
-    })
+        final_update = {
+            f"status:{user_id}": "FINISHED",
+            f"status:{opponent_id}": "FINISHED",
+            "finalized": "true",
+            f"final_result:{user_id}": json.dumps(results[user_id]),
+            f"final_result:{opponent_id}": json.dumps(results[opponent_id])
+        }
+        
+        for field, value in final_update.items():
+            await asyncio.to_thread(redis_client.hset, match_key, field, value)
         
         return results[user_id]
     
