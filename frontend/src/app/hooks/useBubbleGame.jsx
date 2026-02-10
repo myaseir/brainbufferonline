@@ -32,7 +32,7 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
   const [correctNumbers, setCorrectNumbers] = useState([]);
   const [isDraw, setIsDraw] = useState(false);
   const [countdown, setCountdown] = useState(3);
-  const [roundTimer, setRoundTimer] = useState(10);
+  const [roundTimer, setRoundTimer] = useState(8);
   const [showPerfectRound, setShowPerfectRound] = useState(false);
   const [showRoundScreen, setShowRoundScreen] = useState(false);
   const [won, setWon] = useState(false);
@@ -95,7 +95,7 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
 
     if (roundTimerRef.current) clearInterval(roundTimerRef.current);
     roundEndTimeRef.current = Date.now() + durationMs;
-    const roundTotalDuration = Math.max(10000 - ((round - 1) * 500), 2000);
+    const roundTotalDuration = Math.max(8000 - ((round - 1) * 500), 2000);
 
     roundTimerRef.current = setInterval(() => {
       if (matchEndedRef.current) { 
@@ -112,7 +112,7 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
         handleGameOver();
       } else {
         const progress = (roundTotalDuration - msLeft) / roundTotalDuration;
-        const visualRemaining = 10 * (1 - progress);
+        const visualRemaining = 8 * (1 - progress);
         const secs = Math.max(0, Math.ceil(visualRemaining));
         setRoundTimer(secs);
         if (secs <= 3 && !document.hidden) {
@@ -126,7 +126,7 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
       if (matchEndedRef.current) return;
 
       clearAllTimers(); 
-      setRoundTimer(10); 
+      setRoundTimer(8); 
       processingClickRef.current.clear();
       currentStepRef.current = 0; 
       setCurrentStep(0); 
@@ -181,7 +181,7 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
       setIsForfeit(false);
       setClickedNumbers([]);
       setCorrectNumbers([]);
-      setRoundTimer(10); 
+      setRoundTimer(8); 
       setIsPaused(false);
       setGameState('idle'); 
       setWaitingForResult(false); 
@@ -410,11 +410,11 @@ export const useBubbleGame = ({ mode, socket, onQuit, onRestart, onRequeue }) =>
   // --- SECONDARY EFFECTS ---
   useEffect(() => {
       if (gameState === 'showing' && !isPaused) {
-        const revealTime = Math.max(3000 - (round - 1) * 300, 1000);
+        const revealTime = 2000; // Fixed at 2 seconds for every round
         hideTimerRef.current = setTimeout(() => {
           if (matchEndedRef.current) return;
           setGameState('playing');
-          const realDuration = Math.max(10000 - ((round - 1) * 500), 2000); 
+          const realDuration = Math.max(8000 - ((round - 1) * 500), 2000); 
           startTimer(realDuration);
         }, revealTime);
         return () => clearTimeout(hideTimerRef.current);

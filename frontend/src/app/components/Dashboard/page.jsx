@@ -172,6 +172,7 @@ const handleCopy = () => {
   const handleWithdraw = async (e) => {
     e.preventDefault();
     const withdrawAmount = Number(withdrawData.amount);
+    
     if (withdrawAmount <= 0) return alert("Invalid amount");
     if (withdrawAmount > currentBalance) return alert("Insufficient balance");
     setIsSubmitting(true);
@@ -312,7 +313,7 @@ useEffect(() => {
               <div className="absolute -right-4 -bottom-4 opacity-[0.03] rotate-12 text-slate-900"><Trophy size={160} /></div>
             </div>
 
-            {/* <ReferralCard user={localUser} onUpdateUser={handleDataUpdate} /> */}
+            <ReferralCard user={localUser} onUpdateUser={handleDataUpdate} />
             <RecentMatches matches={localUser?.recent_matches || []} />
           </div>
 
@@ -358,7 +359,7 @@ useEffect(() => {
         </div>
       )}
 
-      {showWithdrawModal && (
+   {showWithdrawModal && (
   <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
     <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl relative">
       <button onClick={() => setShowWithdrawModal(false)} className="absolute top-6 right-6 p-2 bg-slate-50 rounded-xl text-slate-400"><X size={20} /></button>
@@ -367,8 +368,7 @@ useEffect(() => {
         <div className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center"><Wallet size={24} /></div>
         <div>
           <h2 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Withdrawal</h2>
-          {/* Added a helper text for the user */}
-          <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Min. 300 PKR required</p>
+          <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Min. 500 PKR required</p>
         </div>
       </div>
 
@@ -376,15 +376,15 @@ useEffect(() => {
         <div className="relative">
           <input 
             type="number" 
-            min="300" // Updated from 1 to 300
+            min="500" 
             required 
             placeholder="Amount (PKR)" 
             value={withdrawData.amount} 
             onChange={(e) => setWithdrawData({...withdrawData, amount: e.target.value})} 
             className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500/20" 
           />
-          {withdrawData.amount > 0 && withdrawData.amount < 300 && (
-            <span className="absolute right-8 top-1/2 -translate-y-1/2 text-[10px] font-black text-red-500 uppercase">Below Min</span>
+          {withdrawData.amount > 0 && withdrawData.amount < 500 && (
+            <span className="absolute right-8 top-1/2 -translate-y-1/2 text-[10px] font-black text-red-500 uppercase">Min 500</span>
           )}
         </div>
 
@@ -397,9 +397,17 @@ useEffect(() => {
         <input type="text" required placeholder="Account Number" value={withdrawData.accountNumber} onChange={(e) => setWithdrawData({...withdrawData, accountNumber: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold outline-none" />
         <input type="text" required placeholder="Account Title" value={withdrawData.accountName} onChange={(e) => setWithdrawData({...withdrawData, accountName: e.target.value})} className="w-full bg-slate-50 border-none p-4 rounded-2xl text-sm font-bold outline-none" />
         
+        {/* 🕒 NEW: Withdrawal Timeframe Message */}
+        <div className="bg-amber-50 border border-amber-100 p-3 rounded-2xl">
+          <p className="text-[10px] text-amber-700 font-bold text-center leading-tight">
+            ⚠️ PROCESSING TIME: 1-72 HOURS <br/>
+            Requests are verified manually by the Brain Buffer team
+          </p>
+        </div>
+
         <button 
           type="submit" 
-          disabled={isSubmitting || withdrawData.amount < 300} // Extra safety check
+          disabled={isSubmitting || withdrawData.amount < 500} 
           className="w-full bg-slate-900 text-white p-5 rounded-3xl font-black uppercase text-xs hover:bg-emerald-600 disabled:opacity-50 transition-all shadow-xl shadow-slate-900/10"
         >
           {isSubmitting ? "Processing..." : "Confirm Withdrawal"}

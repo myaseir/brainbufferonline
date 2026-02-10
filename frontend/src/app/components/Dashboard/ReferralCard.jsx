@@ -1,6 +1,6 @@
 "use client";
 import React, { useState } from 'react';
-import { Share2, Copy, Gift, Check, Loader2, Sparkles, ArrowRight } from 'lucide-react';
+import { Share2, Copy, Gift, Check, Loader2, Sparkles, ArrowRight, Heart } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
 const ReferralCard = ({ user, onUpdateUser }) => {
@@ -9,7 +9,6 @@ const ReferralCard = ({ user, onUpdateUser }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = (e) => {
-    // Prevent accidental form triggers or parent bubbling
     e.preventDefault();
     e.stopPropagation();
 
@@ -32,17 +31,15 @@ const ReferralCard = ({ user, onUpdateUser }) => {
 const shareToWhatsApp = () => {
   const referralCode = user?.referral_code || "MYCODE";
   
-  // Structured to highlight the 100 PKR immediately
+  // 🔥 UPDATED: Message no longer promises money to the joiner
   const message = 
-    `🔥 *EARN 50 PKR INSTANTLY!* 💰\n\n` +
-    `I'm using *BrainBuffer* to sharpen my mind and earn real cash. 🧠✨\n\n` +
+    `🧠 Sharpen your mind with BrainBuffer! 🇵🇰\n\n` +
+    `I'm using this app to play skill-based games and earn real cash rewards. Join me and help me out by using my code! ✨\n\n` +
     `1️⃣ Download the app below\n` +
-    `2️⃣ Enter my code: *${referralCode}*\n` +
-    `3️⃣ Get *50 PKR* added to your wallet immediately! 🎁\n\n` +
-    `🚀 *Download Link:* \n` +
+    `2️⃣ Enter my code: ${referralCode}\n\n` + // Removed asterisks here
+    `🚀 Download Link: \n` +               // Removed asterisks here
     `https://www.brainbufferofficial.com\n\n` +
-    `_Play. Sharpen. Earn._ 🇵🇰`;
-
+    `_Play. Sharpen. Earn._`;
   const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
   window.open(url, '_blank');
 };
@@ -62,7 +59,8 @@ const shareToWhatsApp = () => {
       });
       const data = await res.json();
       if (res.ok) {
-        toast.success("Bonus Claimed! +50 PKR");
+        // 🔥 UPDATED: Success message reflects the inviter getting the reward
+        toast.success("Referral applied! Your friend was rewarded.");
         if (onUpdateUser) onUpdateUser();
         setClaimCode('');
       } else {
@@ -86,13 +84,13 @@ const shareToWhatsApp = () => {
             <div className="inline-flex items-center justify-center w-14 h-14 bg-indigo-100 text-indigo-600 rounded-2xl mb-2 shadow-sm">
               <Gift size={28} strokeWidth={1.5} />
             </div>
-            <h2 className="text-2xl font-bold text-slate-800">Refer & Earn</h2>
+            <h2 className="text-2xl font-bold text-slate-800">Invite Friends</h2>
+            {/* 🔥 UPDATED: Text clarifies that YOU earn the bonus */}
             <p className="text-slate-500 text-sm leading-relaxed">
-              Share your code with friends. You both get <span className="font-bold text-emerald-600">50 PKR</span> when they join!
+              Earn <span className="font-bold text-emerald-600">50 PKR</span> for every friend you invite to BrainBuffer!
             </p>
           </div>
 
-          {/* Improved Copy Button Section */}
           <div className="flex justify-center">
             <button 
               type="button"
@@ -124,14 +122,14 @@ const shareToWhatsApp = () => {
           <div className="bg-slate-50 border-t border-slate-100 p-6 sm:p-8">
             <div className="space-y-4">
               <div className="flex items-center gap-2 text-slate-800 font-semibold text-sm">
-                <Sparkles size={16} className="text-amber-500" fill="currentColor" />
-                <span>Have a referral code?</span>
+                <Heart size={16} className="text-pink-500" fill="currentColor" />
+                <span>Support a friend?</span>
               </div>
               
               <div className="flex gap-2">
                 <input 
                   type="text" 
-                  placeholder="ENTER CODE" 
+                  placeholder="ENTER FRIEND'S CODE" 
                   value={claimCode}
                   onChange={(e) => setClaimCode(e.target.value)}
                   className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all uppercase placeholder:normal-case"
@@ -144,8 +142,9 @@ const shareToWhatsApp = () => {
                   {loading ? <Loader2 size={20} className="animate-spin" /> : <ArrowRight size={20} />}
                 </button>
               </div>
-              <p className="text-xs text-slate-400">
-                Enter a friend's code to unlock your <span className="text-emerald-600 font-medium">welcome bonus</span>.
+              {/* 🔥 UPDATED: Explains that the code helps the inviter */}
+              <p className="text-xs text-slate-400 italic">
+                Enter your friend's code to help them earn a <span className="text-indigo-600 font-medium text-[10px] uppercase">support bonus</span>.
               </p>
             </div>
           </div>
