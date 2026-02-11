@@ -110,11 +110,11 @@ class WalletService:
         success = await self.user_repo.apply_referral_bonus(
             downloader_id=downloader_id,
             giver_id=giver_id,
-            amount=50.0
+            amount=0.0
         )
 
         if success:
-            return {"success": True, "message": "Referral successful! Your friend has been rewarded."}
+            return {"success": True, "message": "Referral successful! You are now linked to your friend"}
         
         return {"success": False, "error": "Transaction failed. Please try again."}
     

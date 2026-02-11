@@ -79,6 +79,30 @@ class UserRepository:
         except Exception as e:
             logger.error(f"Error fetching user by username: {e}")
             return None
+    
+    async def get_by_fingerprint(self, fingerprint: str):
+        """
+        🚀 ANTI-CHEAT: Finds a user by their unique device fingerprint.
+        Used during signup to prevent multiple accounts from one device.
+        """
+        try:
+            if not fingerprint:
+                return None
+            user = await self.collection.find_one({"device_fingerprint": fingerprint})
+            if user:
+                user["_id"] = str(user["_id"])
+            return user
+        except Exception as e:
+            logger.error(f"Error fetching user by fingerprint: {e}")
+            return None
+    
+    async def update_password(self, email: str, hashed_password: str) -> bool:
+        """Updates the password field for a specific user."""
+        result = await self.collection.update_one(
+            {"email": email},
+            {"$set": {"hashed_password": hashed_password}}
+    )
+        return result.modified_count > 0
 
     # --- 💰 WALLET & STATS METHODS ---
 
@@ -213,33 +237,36 @@ class UserRepository:
             logger.error(f"Error fetching user by referral code: {e}")
             return None
     
-    async def apply_referral_bonus(self, downloader_id: str, giver_id: str, amount: float):
+    async def apply_referral_bonus(self, downloader_id: str, giver_id: str, amount: float = 0.0):
         """
-        Atomically rewards both the new user and the referrer using a MongoDB transaction.
+        🔗 LINKS THE USERS ONLY. 
+        Rewards are disabled (amount defaults to 0.0) to prevent bot abuse.
         """
         try:
-            # start_session is a synchronous call in Motor, though the session itself is used in async contexts
+            # start_session is a synchronous call in Motor
             async with await db.client.start_session() as session:
                 async with session.start_transaction():
-                    # 1. Update the Giver (Referrer)
-                    await self.update_wallet(giver_id, amount, session=session)
+                    # 1. We skip the wallet update for the giver entirely.
+                    # This removes the 50 PKR payout.
                     
-                    # 2. Update the Downloader (New User) and mark them as referred
+                    # 2. Update the Downloader (New User) to link them to the Referrer
                     await self.collection.update_one(
                         {"_id": self._to_id(downloader_id)},
                         {
-                            # "$inc": {"wallet_balance": amount},
-                            "$set": {"referred_by": self._to_id(giver_id)}
+                            "$set": {
+                                "referred_by": self._to_id(giver_id),
+                                "referral_linked_at": datetime.now(timezone.utc)
+                            }
                         },
                         session=session
                     )
             
-            # Clear stats cache as the total system pool has changed
+            # No balance was changed, but we clear the cache for stats consistency
             redis_client.delete("stats:total_pool")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Referral Transaction Failed: {e}")
+            logger.error(f"❌ Referral Linking Failed: {e}")
             return False
     
         
@@ -313,8 +340,8 @@ class UserRepository:
                 "username": "$user_info.username",
                 "email": "$user_info.email",
                 "referral_count": 1,
-                # Assuming 50 PKR per referral bonus
-                "total_earned": {"$multiply": ["$referral_count", 50]}
+                # Assuming 0 PKR per referral bonus
+                "total_earned": {"$literal": 0}
             }}
         ]
         
@@ -324,4 +351,41 @@ class UserRepository:
         except Exception as e:
             logger.error(f"Referral Leaderboard Error: {e}")
             return []
-    
+
+
+    async def get_referred_users_details(self, referrer_id: str):
+        """
+        🚀 ADMIN TOOL: Fetches actual user details for everyone referred by a specific user.
+        Helps verify if the referral counts are from real users.
+        """
+        try:
+            # 1. Convert to safe ID (Handles both string and ObjectId)
+            referrer_oid = self._to_id(referrer_id)
+            
+            # 2. Find all users where 'referred_by' matches this ID
+            # We only fetch necessary fields for the Admin UI to keep it fast
+            cursor = self.collection.find(
+                {"referred_by": referrer_oid},
+                {
+                    "username": 1, 
+                    "email": 1, 
+                    "created_at": 1, 
+                    "wallet_balance": 1,
+                    "total_matches": 1
+                }
+            ).sort("created_at", -1) # Show newest referrals first
+
+            referred_users = await cursor.to_list(length=100)
+            
+            # 3. Serialize ObjectIds to strings so the frontend doesn't crash
+            for user in referred_users:
+                user["_id"] = str(user["_id"])
+                if user.get("created_at"):
+                    user["created_at"] = user["created_at"].isoformat() if isinstance(user["created_at"], datetime) else user["created_at"]
+
+            return referred_users
+
+        except Exception as e:
+            logger.error(f"❌ Error fetching referral details for {referrer_id}: {e}")
+            return []
+        

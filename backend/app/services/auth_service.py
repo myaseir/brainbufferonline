@@ -66,10 +66,16 @@ class AuthService:
         digits = "".join(random.choices(string.digits, k=3))
         return f"{prefix}{digits}"
     
-    async def register_user(self, username, password, email):
+    async def register_user(self, username, password, email, device_fingerprint):
         """
-        Hashes password and saves a new user with pre-caching.
+        Hashes password and saves a new user with device fingerprint protection.
         """
+        # 🛡️ 1. CHECK FINGERPRINT BEFORE CREATING
+        # This is the last line of defense
+        existing_device = await self.repo.get_by_fingerprint(device_fingerprint)
+        if existing_device:
+            return None # Or raise a custom exception
+
         existing_email = await self.repo.get_by_email(email)
         existing_user = await self.repo.get_by_username(username)
         
@@ -80,6 +86,7 @@ class AuthService:
             "username": username,
             "email": email,
             "hashed_password": get_password_hash(password),
+            "device_fingerprint": device_fingerprint, # 💾 SAVE THE FINGERPRINT
             "wallet_balance": 50.0,
             "total_wins": 0,
             "role": "user",
@@ -114,3 +121,26 @@ class AuthService:
             "total_pages": total_pages,
             "current_page": page
         }
+    
+    async def is_device_registered(self, fingerprint: str) -> bool:
+        """
+        🚀 BREVO SAVER: Checks if a device is already registered 
+        before sending an OTP email.
+        """
+        if not fingerprint:
+            return False
+        user = await self.repo.get_by_fingerprint(fingerprint)
+        return user is not None
+    
+    async def update_user_password(self, email: str, new_password: str):
+        """Hashes the new password and clears the user's login cache."""
+        hashed_pwd = get_password_hash(new_password)
+    
+    # 1. Update in MongoDB via Repository
+        success = await self.repo.update_password(email, hashed_pwd)
+    
+    # 2. ⚡ CACHE INVALIDATION: Force the user to fetch new data on next login
+        if success:
+            redis_client.delete(f"user:email:{email}")
+        
+        return success

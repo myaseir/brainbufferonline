@@ -9,7 +9,7 @@ import LobbyListener from '../LobbyListener';
 import SupportModal from './SupportModal';
 import { useNetworkCheck } from '../../hooks/useNetworkCheck'; 
 import ReferralCard from './ReferralCard';
-
+import TransactionSidebar from './TransactionSidebar'; // 👈 Add this
 import { 
   Target, Play, Zap, Crown, Trophy, X, DollarSign, UserCheck, 
   Smartphone, Hash, Banknote, CheckCircle2, Wallet, Lock, 
@@ -26,8 +26,10 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [showFriends, setShowFriends] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [requestCount, setRequestCount] = useState(0);
-
+  const [transactions, setTransactions] = useState([]);
+const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   // Form States
   const [depositData, setDepositData] = useState({ amount: "", fullName: "", senderNumber: "", trxId: "" });
   const [withdrawData, setWithdrawData] = useState({ amount: "", method: "Easypaisa", accountNumber: "", accountName: "" });
@@ -40,7 +42,25 @@ export default function DashboardPage({ user, onStartGame, onStartOffline, onLog
 
   // User State
   const [localUser, setLocalUser] = useState(user);
-
+const handleOpenHistory = async () => {
+    setIsHistoryLoading(true); // Start spinning
+    setShowHistory(true);      // Open sidebar
+    
+    try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/wallet/history`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+            const data = await res.json();
+            setTransactions(data);
+        }
+    } catch (err) {
+        toast.error("Failed to load history");
+    } finally {
+        setIsHistoryLoading(false); // Stop spinning
+    }
+};
   // --- 🔄 REFRESH & FETCH LOGIC ---
 const handleCopy = () => {
     navigator.clipboard.writeText(accountNo);
@@ -76,26 +96,21 @@ const handleCopy = () => {
   }, []);
 
   const handleDataUpdate = async () => {
-    // Re-fetch both user data AND global stats
+    const token = localStorage.getItem('token');
     const [updatedUser] = await Promise.all([
       fetchUserData(),
-      fetchStats()
+      fetchStats(),
+      // 🚀 Fetch transaction history here
+      fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/wallet/history`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      }).then(res => res.json()).then(data => setTransactions(data))
     ]);
 
     if (updatedUser) {
       setLocalUser(updatedUser);
-      toast.success("Dashboard Updated", {
-        style: {
-          borderRadius: '12px',
-          background: '#0f172a',
-          color: '#fff',
-          fontSize: '10px',
-          fontWeight: 'bold',
-          textTransform: 'uppercase'
-        }
-      });
+      toast.success("Dashboard Updated");
     }
-  };
+};
 
   useEffect(() => {
     fetchStats();
@@ -211,7 +226,12 @@ useEffect(() => {
   return (
     <div className="min-h-screen bg-[#fcfdfd] text-slate-800 p-4 md:p-8 relative">
       <LobbyListener onJoinChallenge={onJoinChallenge} />
-
+<TransactionSidebar 
+  isOpen={showHistory} 
+  onClose={() => setShowHistory(false)} 
+  transactions={transactions} 
+  loading={isHistoryLoading} // 👈 Pass the loading state
+/>
       <FriendSidebar 
         isOpen={showFriends} 
         onClose={() => setShowFriends(false)} 
@@ -233,6 +253,7 @@ useEffect(() => {
           onWithdraw={() => setShowWithdrawModal(true)} 
           onLogout={onLogout}
           onOpenFriends={() => setShowFriends(true)}
+          onOpenHistory={handleOpenHistory}
           requestCount={requestCount}
           onRefresh={handleDataUpdate}
         />

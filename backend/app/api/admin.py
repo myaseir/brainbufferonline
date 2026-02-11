@@ -310,3 +310,23 @@ async def admin_referral_leaderboard(
     )
     
     return result
+
+
+@router.get("/referral/{user_id}/details")
+async def get_user_referral_details(
+    user_id: str, 
+    admin: dict = Depends(get_current_admin)
+):
+    """
+    Detailed audit: Shows the names and join dates of everyone 
+    referred by a specific user.
+    """
+    # Use the new repo function we just added
+    details = await user_repo.get_referred_users_details(user_id)
+    
+    return {
+        "status": "success",
+        "referrer_id": user_id,
+        "referrals": details,
+        "count": len(details)
+    }

@@ -18,6 +18,7 @@ class SignupRequest(BaseModel):
     username: str
     email: EmailStr
     password: str
+    device_fingerprint: str
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -78,34 +79,39 @@ async def send_otp_email(target_email: str, code: str):
 
 @router.post("/signup/request")
 async def signup_request(user_data: SignupRequest, background_tasks: BackgroundTasks):
+    # 🛡️ THE BREVO SAVER: Check fingerprint BEFORE sending email
+    if await auth_service.is_device_registered(user_data.device_fingerprint):
+        raise HTTPException(
+            status_code=400, 
+            detail="Access Denied: Our system has detected a conflict with an existing profile"
+        )
+
     existing_email = await auth_service.get_user_by_email(user_data.email)
     if existing_email:
         raise HTTPException(status_code=400, detail="Email already registered")
     
     otp_code = str(random.randint(100000, 999999))
     
-    # --- 🚀 SCALING UPDATE: REDIS STORAGE ---
-    # We store the signup info in Redis with a 10-minute expiry (600s)
-    # This works across all servers!
+    # 🚀 Update Redis storage to include the fingerprint
     signup_data = {
         "username": user_data.username,
         "password": user_data.password, 
-        "code": otp_code
+        "code": otp_code,
+        "device_fingerprint": user_data.device_fingerprint # 💾 MUST STORE THIS
     }
     
-    # Store as a JSON string in Redis
     redis_client.set(
         f"signup:{user_data.email}", 
         json.dumps(signup_data), 
         ex=600
     )
     
+    # Email is ONLY sent if the fingerprint check above passes
     background_tasks.add_task(send_otp_email, user_data.email, otp_code)
     return {"msg": "Verification code sent to email. Valid for 10 minutes."}
 
 @router.post("/signup/verify")
 async def signup_verify(data: VerifyRequest):
-    # --- 🚀 SCALING UPDATE: FETCH FROM REDIS ---
     cached_data = redis_client.get(f"signup:{data.email}")
     
     if not cached_data:
@@ -116,21 +122,99 @@ async def signup_verify(data: VerifyRequest):
     if user_info["code"] != data.code:
         raise HTTPException(status_code=400, detail="Invalid verification code")
     
-    # Create the user in MongoDB
+    # 🔑 Pass the device_fingerprint from Redis to the registration service
     user_id = await auth_service.register_user(
         user_info["username"], 
         user_info["password"],
-        data.email
+        data.email,
+        user_info["device_fingerprint"] # ⚡ Critical Update
     )
     
     if not user_id:
-        raise HTTPException(status_code=500, detail="User creation failed")
+        # If register_user returns None, it means the fingerprint 
+        # check failed at the last second (race condition)
+        raise HTTPException(status_code=400, detail="Registration failed: Device already in use.")
     
-    # Delete from Redis after successful verification
     redis_client.delete(f"signup:{data.email}")
-    
     return {"msg": "Account verified successfully", "user_id": str(user_id)}
 
+# --- Add these to your Pydantic Models section ---
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordSubmit(BaseModel):
+    email: EmailStr
+    code: str
+    new_password: str
+
+# --- Add this to your Helper section ---
+async def send_reset_email(target_email: str, code: str):
+    brevo_key = settings.BREVO_API_KEY
+    sender_email = settings.SENDER_EMAIL
+    sender_name = getattr(settings, "SENDER_NAME", "Brain Buffer Security")
+
+    url = "https://api.brevo.com/v3/smtp/email"
+    headers = {"accept": "application/json", "api-key": brevo_key, "content-type": "application/json"}
+
+    payload = {
+        "sender": {"name": sender_name, "email": sender_email},
+        "to": [{"email": target_email}],
+        "subject": "Password Reset Request - Action Required",
+        "htmlContent": f"""
+            <html>
+                <body style="font-family: sans-serif; padding: 20px;">
+                    <h2 style="color: #ef4444;">Security: Password Reset</h2>
+                    <p>We received a request to reset your Commander Profile password.</p>
+                    <div style="background: #f4f4f4; padding: 15px; font-size: 24px; font-weight: bold; border-left: 4px solid #ef4444;">
+                        {code}
+                    </div>
+                    <p>If you didn't request this, please secure your account immediately.</p>
+                </body>
+            </html>
+        """
+    }
+    async with httpx.AsyncClient() as client:
+        await client.post(url, json=payload, headers=headers)
+
+# --- Add these new Endpoints ---
+
+@router.post("/password/forgot")
+async def forgot_password(data: ForgotPasswordRequest, background_tasks: BackgroundTasks):
+    user = await auth_service.get_user_by_email(data.email)
+    # We return a success message even if the user doesn't exist 
+    # to prevent "Account Fishing"
+    if user:
+        reset_code = str(random.randint(100000, 999999))
+        # Store in Redis with 'reset:' prefix for 10 minutes
+        redis_client.set(f"reset:{data.email}", reset_code, ex=600)
+        background_tasks.add_task(send_reset_email, data.email, reset_code)
+    
+    return {"msg": "If the account exists, a reset code has been sent."}
+
+@router.post("/password/reset")
+async def reset_password(data: ResetPasswordSubmit):
+    cached_code = redis_client.get(f"reset:{data.email}")
+    
+    if not cached_code or cached_code != data.code:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset code.")
+
+    # Call service to update
+    success = await auth_service.update_user_password(data.email, data.new_password)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to update password.")
+
+    redis_client.delete(f"reset:{data.email}")
+    return {"msg": "Password updated successfully. You can now login."}
+
+@router.post("/password/verify-code")
+async def verify_reset_code(data: ForgotPasswordRequest, code: str):
+    """Checks if the OTP is correct without changing the password yet."""
+    cached_code = redis_client.get(f"reset:{data.email}")
+    
+    if not cached_code or cached_code != code:
+        raise HTTPException(status_code=400, detail="Invalid or expired security code.")
+    
+    return {"msg": "Code verified. Proceed to reset."}
 
 @router.get("/me")
 async def get_current_user_details(user: dict = Depends(get_current_user)):

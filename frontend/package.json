@@ -12,6 +12,7 @@
     "@capacitor/android": "^8.0.2",
     "@capacitor/cli": "^8.0.2",
     "@capacitor/core": "^8.0.2",
+    "@fingerprintjs/fingerprintjs": "^5.0.1",
     "@tailwindcss/postcss": "^4.1.18",
     "canvas-confetti": "^1.9.4",
     "lucide-react": "^0.563.0",

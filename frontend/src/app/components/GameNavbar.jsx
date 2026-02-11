@@ -1,7 +1,7 @@
 "use client";
 import React from 'react';
 import { Trophy, Users, WifiOff } from 'lucide-react';
-
+import { playPopSound } from '../utils/sounds';
 const GameNavbar = ({ 
   score, 
   mode, 
@@ -69,7 +69,11 @@ const GameNavbar = ({
       <div className="flex flex-col items-end gap-2 pointer-events-auto">
         {mode === 'offline' ? (
           <button 
-            onClick={onTogglePause} 
+            onClick={() => {
+    playPopSound(); // 🔊 Play the sound first
+    onTogglePause(); // Then run the pause logic
+  }}
+            
             className="bg-white/90 backdrop-blur-md border border-slate-100 p-3 rounded-2xl shadow-sm hover:text-emerald-500 transition-colors active:scale-90"
           >
             <div className="space-y-1">

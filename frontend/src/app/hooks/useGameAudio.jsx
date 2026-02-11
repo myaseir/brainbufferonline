@@ -15,7 +15,8 @@ export const useGameAudio = (gameState, isPaused) => {
   // 1. Initialize Music & Handle Exit
   useEffect(() => {
     if (typeof window !== 'undefined' && !bgMusicInstance) {
-      bgMusicInstance = new Audio('/bgmusic.mp3');
+     bgMusicInstance = new Audio('https://raw.githubusercontent.com/myaseir/brain-buffer-assets/main/bgmusic.mp3');
+bgMusicInstance.crossOrigin = "anonymous";
       bgMusicInstance.loop = true;
       bgMusicInstance.preload = "auto";
       bgMusicInstance.volume = 0.5;

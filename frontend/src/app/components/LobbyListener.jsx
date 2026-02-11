@@ -17,7 +17,7 @@ const LobbyListener = ({ onJoinChallenge }) => {
 
   useEffect(() => {
     // Initialize sound - using a clean, professional "ping" sound
-    notificationSound.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+    notificationSound.current = new Audio('https://github.com/myaseir/brain-buffer-assets/raw/refs/heads/main/sword-clash.mp3');
 
     const token = localStorage.getItem('token');
     if (!token) return;

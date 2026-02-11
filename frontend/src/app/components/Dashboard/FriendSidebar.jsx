@@ -57,10 +57,21 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
   };
 
   // --- ⚔️ CHALLENGE LOGIC ---
-  const handleBattleClick = (friendId, username) => {
-    // Prevent multiple clicks
+ const handleBattleClick = (friendId, username) => {
+    // 1. Prevent multiple clicks
     if (challengingId === friendId) return;
 
+    // 2. ⚔️ Play Sword Clash Sound (Directly from GitHub CDN)
+    // We use the direct link to ensure compatibility with your Capacitor APK
+    const battleSound = new Audio('https://github.com/myaseir/brain-buffer-assets/raw/refs/heads/main/sword-clash.mp3');
+    battleSound.volume = 0.5; // Set volume to 50%
+    
+    // Play sound (with catch to prevent errors if browser blocks autoplay)
+    battleSound.play().catch(err => {
+      console.log("Sound play prevented until user interaction.");
+    });
+
+    // 3. Update state and trigger challenge
     setChallengingId(friendId);
     
     if (window.sendChallenge) {
@@ -72,7 +83,7 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
         return;
     }
 
-    // Cooldown: Allow retrying after 10 seconds if no response
+    // Cooldown: Reset challenging state after 10 seconds
     setTimeout(() => setChallengingId(null), 10000);
   };
 
@@ -194,7 +205,7 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
           </div>
           
           {searchQuery.length > 1 && (
-            <div className="absolute left-4 right-4 mt-2 bg-white border border-slate-100 rounded-xl shadow-xl z-[60] overflow-hidden">
+           <div className="absolute left-4 right-4 mt-2 bg-white border border-slate-100 rounded-xl shadow-xl z-[60] overflow-hidden max-h-60 overflow-y-auto custom-scrollbar">
                 {searchResults.length === 0 ? (
                     <div className="p-4 text-center text-xs text-slate-400 italic">No users found</div>
                 ) : (
@@ -218,7 +229,7 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
         </div>
 
         {/* List Content */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto p-4 pb-12 space-y-3 custom-scrollbar">
           {loading ? (
             <div className="flex flex-col items-center justify-center h-64 space-y-4">
               <Loader2 className="text-emerald-500 animate-spin w-10 h-10" />

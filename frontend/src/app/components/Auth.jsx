@@ -6,6 +6,8 @@ import {
   Mail, Lock, User, ShieldCheck, ArrowRight, 
   RefreshCcw, RotateCcw, Smartphone, Scale, BookOpen, ChevronDown 
 } from 'lucide-react';
+import { getBrowserFingerprint } from '../utils/fingerprint';
+import ForgetPassword from './ForgotPassword';
 import Link from 'next/link';
 
 export default function Auth({ onLoginSuccess }) {
@@ -16,10 +18,13 @@ export default function Auth({ onLoginSuccess }) {
   const [loading, setLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
 const [acceptedTerms, setAcceptedTerms] = useState(false);
+const [isForgotPassword, setIsForgotPassword] = useState(false);
+const [error, setError] = useState("");
   const toggleMode = () => {
-    setIsLogin(!isLogin);
-    setFormData({ email: '', password: '', username: '' });
-  };
+  setIsLogin(!isLogin);
+  setError(""); // ✨ This clears the "Security Notice" when switching modes
+  setFormData({ email: '', password: '', username: '' });
+};
 
   useEffect(() => {
     let interval;
@@ -38,63 +43,71 @@ const [acceptedTerms, setAcceptedTerms] = useState(false);
     }
   };
 
-  const handleSignupRequest = async (e) => {
-    if (e) e.preventDefault();
-    if (!acceptedTerms) {
-    return alert("You must accept the Terms and Conditions to join the arena.");
+const handleSignupRequest = async (e) => {
+  if (e) e.preventDefault();
+  setError(""); // 🔄 Clear previous error
+  
+  if (!acceptedTerms) return setError("You must accept the Terms and Conditions to join the arena.");
+  if (!formData.email.includes('@')) return setError("Please enter a valid email.");
+  
+  setLoading(true);
+  try {
+    const deviceFingerprint = await getBrowserFingerprint();
+
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/signup/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: formData.email.trim().toLowerCase(),
+        password: formData.password,
+        username: formData.username.trim(),
+        device_fingerprint: deviceFingerprint
+      }),
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+      setStep('otp');
+      setResendTimer(60); 
+    } else {
+      // ✅ Use setError instead of alert
+      setError(data.detail || "Action failed.");
+    }
+  } catch (err) {
+    setError("Backend server connection failed.");
+  } finally {
+    setLoading(false);
   }
-    if (!formData.email.includes('@')) return alert("Please enter a valid email.");
-    setLoading(true);
-    try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/signup/request`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: formData.email.trim().toLowerCase(),
-          password: formData.password,
-          username: formData.username.trim()
-        }),
-      });
+};
 
-      const data = await res.json();
-      if (res.ok) {
-        setStep('otp');
-        setResendTimer(60); 
-      } else {
-        alert(data.detail || "Action failed.");
-      }
-    } catch (err) {
-      alert("Backend server connection failed.");
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const handleLogin = async (e) => {
-    if (e) e.preventDefault();
-    setLoading(true);
-    try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          email: formData.email.trim().toLowerCase(), 
-          password: formData.password 
-        }),
-      });
-      
-      const data = await res.json();
-      if (res.ok) {
-        onLoginSuccess(data); 
-      } else {
-        alert(data.detail || "Login failed.");
-      }
-    } catch (err) {
-      alert("Login server error.");
-    } finally {
-      setLoading(false);
+const handleLogin = async (e) => {
+  if (e) e.preventDefault();
+  setError(""); // Clear old errors
+  setLoading(true);
+  try {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        email: formData.email.trim().toLowerCase(), 
+        password: formData.password 
+      }),
+    });
+    
+    const data = await res.json();
+    if (res.ok) {
+      onLoginSuccess(data); 
+    } else {
+      // ✅ Use UI error instead of alert
+      setError(data.detail || "Login failed."); 
     }
-  };
+  } catch (err) {
+    setError("Login server error.");
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleVerifyCode = async (e) => {
     if (e) e.preventDefault();
@@ -160,147 +173,120 @@ const [acceptedTerms, setAcceptedTerms] = useState(false);
           <div className="absolute bottom-[-10%] left-[-10%] w-[50%] h-[50%] bg-emerald-50/40 blur-[120px] rounded-full"></div>
         </div>
 
-        <div className="w-full max-w-md bg-white/80 backdrop-blur-xl rounded-[2.5rem] shadow-2xl shadow-green-900/10 p-6 md:p-10 border border-white relative z-10 transition-all hover:shadow-green-900/20">
-          
-          {/* Branding */}
-        
-<div className="text-center mb-6 md:mb-8">
-<div className="w-20 h-20 md:w-24 md:h-24 bg-slate-900 rounded-[2rem] flex items-center justify-center mx-auto mb-4 md:mb-6 shadow-xl shadow-green-500/20 animate-pulse relative overflow-hidden border border-slate-800">
-  <Image 
-    src="/brainbuffer.png" 
-    alt="BrainBuffer Logo"
-    width={96}      // Increased to match container
-    height={96} 
-    className="object-contain p-1" // Reduced padding from p-2 to p-1 to make the brain bigger
-  />
-</div>
-  <h1 className="text-2xl md:text-3xl font-black tracking-tighter text-slate-900 uppercase">
-    Brain<span className="text-green-500">Buffer</span>
-  </h1>
-  <p className="text-slate-400 text-[8px] md:text-[9px] font-bold uppercase tracking-[0.25em] mt-2">
-    {step === 'otp' ? 'Verification' : (isLogin ? 'Competitive Arena Access' : 'Register Commander Profile')}
-  </p>
-</div>
-
-          {step === 'form' ? (
-            <form onSubmit={isLogin ? handleLogin : handleSignupRequest} className="space-y-3 md:space-y-4">
-              {!isLogin && (
-                <div className="group relative flex items-center">
-                  <User className="absolute left-4 text-slate-400 group-focus-within:text-green-500 transition-colors" size={18} />
-                  <input 
-                    type="text" 
-                    placeholder="Username"
-                    className="w-full pl-12 pr-4 py-3 md:py-4 bg-slate-50 border border-slate-100 rounded-xl focus:bg-white focus:border-green-400 outline-none transition-all font-bold text-sm text-slate-700"
-                    value={formData.username}
-                    onChange={(e) => setFormData({...formData, username: e.target.value})}
-                    required={!isLogin}
-                  />
-                </div>
-              )}
-
-              <div className="group relative flex items-center">
-                <Mail className="absolute left-4 text-slate-400 group-focus-within:text-green-500 transition-colors" size={18} />
-                <input 
-                  type="email" 
-                  placeholder="Email Address"
-                  className="w-full pl-12 pr-4 py-3 md:py-4 bg-slate-50 border border-slate-100 rounded-xl focus:bg-white focus:border-green-400 outline-none transition-all font-bold text-sm text-slate-700"
-                  value={formData.email}
-                  onChange={(e) => setFormData({...formData, email: e.target.value})}
-                  required
-                />
-              </div>
-
-              <div className="group relative flex items-center">
-                <Lock className="absolute left-4 text-slate-400 group-focus-within:text-green-500 transition-colors" size={18} />
-                <input 
-                  type="password" 
-                  placeholder="Password"
-                  className="w-full pl-12 pr-4 py-3 md:py-4 bg-slate-50 border border-slate-100 rounded-xl focus:bg-white focus:border-green-400 outline-none transition-all font-bold text-sm text-slate-700"
-                  value={formData.password}
-                  onChange={(e) => setFormData({...formData, password: e.target.value})}
-                  required
-                />
-              </div>
-{!isLogin && (
-  <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 transition-all hover:border-green-200">
-    <div className="relative flex items-center h-5">
-      <input
-        id="terms"
-        type="checkbox"
-        checked={acceptedTerms}
-        onChange={(e) => setAcceptedTerms(e.target.checked)}
-        className="w-5 h-5 rounded-md border-slate-300 text-green-500 focus:ring-green-500 cursor-pointer"
-        required
-      />
+      <div className="w-full max-w-md bg-white/80 backdrop-blur-xl rounded-[2.5rem] shadow-2xl shadow-green-900/10 p-6 md:p-10 border border-white relative z-10 transition-all hover:shadow-green-900/20">
+  
+  {/* Branding Section */}
+  <div className="text-center mb-6 md:mb-8">
+    <div className="w-20 h-20 md:w-24 md:h-24 bg-slate-900 rounded-[2rem] flex items-center justify-center mx-auto mb-4 md:mb-6 shadow-xl shadow-green-500/20 animate-pulse relative overflow-hidden border border-slate-800">
+      <Image src="/brainbuffer.png" alt="BrainBuffer Logo" width={96} height={96} className="object-contain p-1" />
     </div>
-    <div className="text-[10px] md:text-xs leading-tight">
-      <label htmlFor="terms" className="font-bold text-slate-700 cursor-pointer">
-        I accept the <Link href="/terms" className="text-green-600 underline">Terms and Conditions</Link>
-      </label>
-      <p className="text-slate-400 mt-1 font-medium italic">
-        I acknowledge BrainBuffer is a skill-based arena and I am responsible for my cognitive performance.
-      </p>
-    </div>
+    <h1 className="text-2xl md:text-3xl font-black tracking-tighter text-slate-900 uppercase">
+      Brain<span className="text-green-500">Buffer</span>
+    </h1>
+    <p className="text-slate-400 text-[8px] md:text-[9px] font-bold uppercase tracking-[0.25em] mt-2">
+      {isForgotPassword ? 'Reset Commander Access' : (step === 'otp' ? 'Verification' : (isLogin ? 'Competitive Arena Access' : 'Register Commander Profile'))}
+    </p>
   </div>
-)}
-              <button 
-                type="submit"
-                disabled={loading}
-                className="w-full bg-gradient-to-r from-green-500 to-emerald-500 text-white font-black py-3 md:py-4 rounded-xl shadow-lg transition-all active:scale-[0.97] flex items-center justify-center gap-2 mt-4 disabled:opacity-50"
-              >
-                <span className="uppercase tracking-widest text-[10px] md:text-xs">
-                  {loading ? <RefreshCcw className="animate-spin" /> : (isLogin ? 'Log in' : 'Join Arena')}
-                </span>
-                {!loading && <ArrowRight size={18} />}
-              </button>
 
-              <div className="text-center pt-2">
-                <button 
-                  type="button" 
-                  onClick={toggleMode}
-                  className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-green-500 transition-colors"
-                >
-                  {isLogin ? "New Challenger? Register" : "Member? Login"}
-                </button>
-              </div>
-            </form>
-          ) : (
-            <form onSubmit={handleVerifyCode} className="space-y-4 md:space-y-6 animate-in fade-in zoom-in duration-300">
-              <div className="text-center p-4 md:p-6 bg-green-50/50 rounded-2xl border border-green-100">
-                <p className="text-slate-500 text-[8px] md:text-[10px] font-bold uppercase tracking-widest mb-1">Security Code Sent To</p>
-                <p className="text-slate-900 font-bold text-xs md:text-sm truncate">{formData.email}</p>
-              </div>
-              
+  {/* MASTER SWITCH: Either show ForgetPassword OR the normal forms */}
+  {isForgotPassword ? (
+    <ForgetPassword onBack={() => setIsForgotPassword(false)} />
+  ) : (
+    <>
+      {step === 'form' ? (
+        <form onSubmit={isLogin ? handleLogin : handleSignupRequest} className="space-y-3 md:space-y-4">
+          {!isLogin && (
+            <div className="group relative flex items-center">
+              <User className="absolute left-4 text-slate-400" size={18} />
               <input 
-                type="text" 
-                placeholder="000000" 
-                maxLength={6}
-                className="w-full text-center text-2xl md:text-3xl tracking-[0.3em] font-black py-4 bg-slate-50 rounded-2xl border border-slate-100 focus:bg-white focus:border-green-400 outline-none transition-all text-slate-800"
-                value={verificationCode}
-                onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))}
-                inputMode="numeric"
+                type="text" placeholder="Username" className="w-full pl-12 pr-4 py-3 md:py-4 bg-slate-50 border border-slate-100 rounded-xl outline-none font-bold text-sm"
+                value={formData.username} onChange={(e) => setFormData({...formData, username: e.target.value})} required={!isLogin}
               />
-
-              <button 
-                type="submit"
-                disabled={loading}
-                className="w-full bg-slate-900 text-white font-black py-3 md:py-4 rounded-xl shadow-lg transition-all active:scale-[0.98] uppercase tracking-widest text-xs disabled:opacity-70"
-              >
-                {loading ? 'Validating...' : 'Verify & Enter'}
-              </button>
-
-              <button 
-                type="button"
-                onClick={() => handleSignupRequest()}
-                disabled={resendTimer > 0 || loading}
-                className="w-full text-[10px] font-black uppercase tracking-widest text-green-600 disabled:text-slate-300"
-              >
-                <RotateCcw size={12} className={`inline mr-1 ${loading ? "animate-spin" : ""}`} />
-                {resendTimer > 0 ? `Resend in ${resendTimer}s` : "Resend Security Code"}
-              </button>
-            </form>
+            </div>
           )}
-        </div>
+
+          <div className="group relative flex items-center">
+            <Mail className="absolute left-4 text-slate-400" size={18} />
+            <input 
+              type="email" placeholder="Email Address" className="w-full pl-12 pr-4 py-3 md:py-4 bg-slate-50 border border-slate-100 rounded-xl outline-none font-bold text-sm"
+              value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} required
+            />
+          </div>
+
+          <div className="group relative flex items-center">
+            <Lock className="absolute left-4 text-slate-400" size={18} />
+            <input 
+              type="password" placeholder="Password" className="w-full pl-12 pr-4 py-3 md:py-4 bg-slate-50 border border-slate-100 rounded-xl outline-none font-bold text-sm"
+              value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} required
+            />
+          </div>
+
+          {isLogin && (
+            <div className="text-right mt-[-8px]">
+              <button 
+                type="button" onClick={() => setIsForgotPassword(true)}
+                className="text-[9px] font-black uppercase text-slate-400 hover:text-green-500 transition-colors"
+              >
+                Forgot Password?
+              </button>
+            </div>
+          )}
+
+          {!isLogin && (
+            <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 transition-all hover:border-green-200">
+              <input id="terms" type="checkbox" checked={acceptedTerms} onChange={(e) => setAcceptedTerms(e.target.checked)} className="w-5 h-5 rounded-md border-slate-300 text-green-500 cursor-pointer" required />
+              <div className="text-[10px] md:text-xs leading-tight">
+                <label htmlFor="terms" className="font-bold text-slate-700 cursor-pointer">
+                  I accept the <Link href="/terms" className="text-green-600 underline">Terms and Conditions</Link>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div className="flex items-center gap-3 p-3 mb-3 bg-red-50 border-l-4 border-red-500 rounded-r-xl animate-in fade-in slide-in-from-top-1 duration-300">
+              <ShieldCheck className="text-red-500 shrink-0" size={18} />
+              <p className="text-[11px] font-bold text-slate-700 leading-tight">{error}</p>
+            </div>
+          )}
+
+          <button type="submit" disabled={loading} className="w-full bg-gradient-to-r from-green-500 to-emerald-500 text-white font-black py-3 md:py-4 rounded-xl shadow-lg transition-all active:scale-[0.97] flex items-center justify-center gap-2 mt-4 disabled:opacity-50">
+            <span className="uppercase tracking-widest text-[10px] md:text-xs">
+              {loading ? <RefreshCcw className="animate-spin" /> : (isLogin ? 'Log in' : 'Join Arena')}
+            </span>
+            {!loading && <ArrowRight size={18} />}
+          </button>
+
+          <div className="text-center pt-2">
+            <button type="button" onClick={toggleMode} className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-green-500 transition-colors">
+              {isLogin ? "New Challenger? Register" : "Member? Login"}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <form onSubmit={handleVerifyCode} className="space-y-4 md:space-y-6 animate-in fade-in zoom-in duration-300">
+          <div className="text-center p-4 md:p-6 bg-green-50/50 rounded-2xl border border-green-100">
+            <p className="text-slate-500 text-[8px] md:text-[10px] font-bold uppercase tracking-widest mb-1">Security Code Sent To</p>
+            <p className="text-slate-900 font-bold text-xs md:text-sm truncate">{formData.email}</p>
+          </div>
+          <input 
+            type="text" placeholder="000000" maxLength={6}
+            className="w-full text-center text-2xl md:text-3xl tracking-[0.3em] font-black py-4 bg-slate-50 rounded-2xl border border-slate-100 outline-none text-slate-800"
+            value={verificationCode} onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))} inputMode="numeric"
+          />
+          <button type="submit" disabled={loading} className="w-full bg-slate-900 text-white font-black py-3 md:py-4 rounded-xl uppercase tracking-widest text-xs">
+            {loading ? 'Validating...' : 'Verify & Enter'}
+          </button>
+          <button type="button" onClick={() => handleSignupRequest()} disabled={resendTimer > 0 || loading} className="w-full text-[10px] font-black uppercase text-green-600 disabled:text-slate-300">
+            <RotateCcw size={12} className={`inline mr-1 ${loading ? "animate-spin" : ""}`} />
+            {resendTimer > 0 ? `Resend in ${resendTimer}s` : "Resend Security Code"}
+          </button>
+        </form>
+      )}
+    </>
+  )}
+</div>
+        
         <div className="mt-8 pt-6 border-t border-slate-100 flex items-center justify-center gap-6 opacity-60 grayscale hover:grayscale-0 transition-all">
   
 </div>
@@ -308,7 +294,7 @@ const [acceptedTerms, setAcceptedTerms] = useState(false);
         {/* Scroll Hint */}
         <div 
           onClick={() => scrollToSection('download')}
-          className="absolute bottom-4 md:bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap- md:gap-2 cursor-pointer z-20 group"
+          className="absolute bottom-4 md:bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap- md:gap-5 cursor-pointer z-20 group"
         >
            <span className="text-[8px] md:text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 group-hover:text-green-500 transition-colors">Legal & App</span>
            <ChevronDown className="animate-bounce text-green-500" size={20} />

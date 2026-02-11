@@ -84,12 +84,45 @@ const BubbleGame = ({ mode = 'offline', socket = null, onQuit = null, onRestart 
       <ParticlesBackground />
       
       {/* Audio Elements */}
-      <audio ref={logic.tickAudioRef} src="/gametimer.mp3" preload="auto" />
-      <audio ref={logic.correctAudioRef} src="/tap.wav" preload="auto" />
-      <audio ref={logic.wrongAudioRef} src="/error.mp3" preload="auto" />
-      <audio ref={logic.gameOverAudioRef} src="/over.wav" preload="auto" />
-      <audio ref={logic.winAudioRef} src="/win.wav" preload="auto" />
-      <audio ref={logic.startSoundRef} src="/start.wav" />
+    <audio 
+  ref={logic.tickAudioRef} 
+  src="https://raw.githubusercontent.com/myaseir/brain-buffer-assets/main/gametimer.mp3" 
+  preload="auto" 
+  crossOrigin="anonymous"
+/>
+     {/* Replace your existing line with this */}
+<audio 
+  ref={logic.correctAudioRef} 
+  src="https://raw.githubusercontent.com/myaseir/brain-buffer-assets/main/tap.wav" 
+  preload="auto" 
+  crossOrigin="anonymous"
+  onCanPlayThrough={() => console.log("Tap sound loaded and ready!")}
+  onError={(e) => console.error("Audio failed to load from GitHub", e)}
+/>
+     <audio 
+  ref={logic.wrongAudioRef} 
+  src="https://raw.githubusercontent.com/myaseir/brain-buffer-assets/main/error.mp3" 
+  preload="auto" 
+  crossOrigin="anonymous"
+/>
+     <audio 
+  ref={logic.gameOverAudioRef} 
+  src="https://raw.githubusercontent.com/myaseir/brain-buffer-assets/main/over.wav" 
+  preload="auto" 
+  crossOrigin="anonymous"
+/>
+     <audio 
+  ref={logic.winAudioRef} 
+  src="https://raw.githubusercontent.com/myaseir/brain-buffer-assets/main/win.wav" 
+  preload="auto" 
+  crossOrigin="anonymous"
+/>
+     <audio 
+  ref={logic.startSoundRef} 
+  src="https://raw.githubusercontent.com/myaseir/brain-buffer-assets/main/start.wav" 
+  preload="auto" 
+  crossOrigin="anonymous"
+/>
 
       {/* Top Bar */}
       <GameNavbar 

@@ -47,20 +47,20 @@ async def wait_for_match_ready(match_id: str, user_id: str, timeout: int = 30):
 
 async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_score, op_score, op_name, user_repo):
     """
-    🚀 TRANSACTIONAL FINALIZE: Securely handles winner determination and payout.
+    🚀 UPDATED FINALIZE: Handles Paid Friendly Matches with Early Termination support.
     """
     match_key = f"match:live:{match_id}"
     lock_key = f"lock:finalizing:{match_id}"
     
-    # 🔒 Atomic Lock for Master Processor
     locked = await asyncio.to_thread(redis_client.set, lock_key, "true", nx=True, ex=30)
     
     if locked:
-        logger.info(f"🏁 Finalizing match {match_id}. Processor: {user_id}")
+        logger.info(f"🏁 Finalizing match {match_id}. Reason: {result_type}")
         
         raw_data = await asyncio.to_thread(redis_client.hgetall, match_key)
         match_data = {to_str(k): to_str(v) for k, v in raw_data.items()}
         
+        # Get the actual scores from Redis (source of truth)
         f_my_score = int(match_data.get(f"score:{user_id}", 0))
         f_op_score = int(match_data.get(f"score:{opponent_id}", 0))
         my_name = match_data.get(f"name:{user_id}", "You")
@@ -68,6 +68,7 @@ async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_sco
         is_draw = False
         winner_id = None
         
+        # 1. Determine Winner based on Score or Fleeing
         if result_type == "OPPONENT_FLED":
             winner_id = user_id
             status_caller, status_op = "WON", "LOST"
@@ -84,10 +85,12 @@ async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_sco
                 is_draw = True
                 status_caller, status_op = "DRAW", "DRAW"
             
-            summary_caller = f"Match {status_caller}"
-            summary_op = f"Match {status_op}"
+            # 2. Add "Early Victory" text if the match ended early
+            prefix = "Early " if result_type == "EARLY_WIN" else ""
+            summary_caller = f"{prefix}Victory! (+90 PKR)" if status_caller == "WON" else f"Match {status_caller}"
+            summary_op = f"Opponent won by score." if status_op == "LOST" else f"Match {status_op}"
 
-        # 💰 Execute DB Transaction (Wallet + History)
+        # 3. Process Payout (Always happens since money is involved)
         payout_task = asyncio.create_task(
             user_repo.process_match_payout(
                 match_id=match_id,
@@ -97,17 +100,11 @@ async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_sco
                 p1_score=f_my_score,
                 p2_score=f_op_score,
                 is_draw=is_draw
-        )   )
-        
-        def handle_payout_result(task):
-            try:
-                task.result()
-            except Exception as e:
-                logger.error(f"❌ Background Payout Failed for {match_id}: {e}")
-                
-        payout_task.add_done_callback(handle_payout_result)
+            )
+        )
+        payout_task.add_done_callback(lambda t: logger.error(f"Payout Error: {t.exception()}") if t.exception() else None)
 
-        # 4. Results Payload
+        # 4. Results Payload for Frontend
         results = {
             user_id: {
                 "type": "RESULT",
@@ -127,9 +124,7 @@ async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_sco
             }
         }
 
-        # 5. ✅ UPSTASH FIX: Use direct calls instead of pipeline.exec() to avoid crashes
-        # The Upstash SDK handles these high-speed sequential writes very well.
-        # ✅ UPSTASH OPTIMIZED: 5 writes in 1 single command
+        # 5. Atomic Update to Redis
         final_update = {
             f"status:{user_id}": "FINISHED",
             f"status:{opponent_id}": "FINISHED",

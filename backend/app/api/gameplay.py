@@ -135,13 +135,14 @@ async def game_websocket_endpoint(
         # --- 7. MONITOR LOOP ---
         last_sync_score = -1
         last_sync_op_score = -1
+        GRACE_PERIOD_SECONDS = 15
 
         while True:
             await asyncio.sleep(2.0) 
-            # yasir
             raw_data = await asyncio.to_thread(redis_client.hgetall, match_key)
             match_data = {to_str(k): to_str(v) for k, v in raw_data.items()}
             
+            # 1. Connection/Finalized Check
             if match_data.get("finalized") == "true":
                 final_res_json = match_data.get(f"final_result:{u_id_str}")
                 if final_res_json:
@@ -154,23 +155,26 @@ async def game_websocket_endpoint(
             op_status = match_data.get(f"status:{opponent_id}")
             op_last_seen = float(match_data.get(f"last_seen:{opponent_id}", 0))
 
-            # A. Opponent Timeout (Flee)
+            # 🚀 A. DETERMINISTIC EARLY TERMINATION (Your Logic)
+            # If I'm finished and they beat me OR they're finished and I beat them
+            if (my_status == "FINISHED" and op_score > my_score) or \
+               (op_status == "FINISHED" and my_score > op_score):
+                await finalize_match(websocket, match_id, u_id_str, opponent_id, "EARLY_WIN", my_score, op_score, opponent_name, user_repo)
+                continue
+
+            # 🚀 B. NORMAL COMPLETION
+            if my_status == "FINISHED" and op_status == "FINISHED":
+                await finalize_match(websocket, match_id, u_id_str, opponent_id, "NORMAL", my_score, op_score, opponent_name, user_repo)
+                continue
+
+            # 🚀 C. TIMEOUT SAFETY (Don't forget this!)
+            # If opponent hasn't sent a score update in 15 seconds, they "fled"
             time_since_op_seen = time.time() - op_last_seen
             if op_status != "FINISHED" and time_since_op_seen > GRACE_PERIOD_SECONDS:
                 await finalize_match(websocket, match_id, u_id_str, opponent_id, "OPPONENT_FLED", my_score, op_score, opponent_name, user_repo)
                 continue
 
-            # B. Normal Completion Logic
-            if my_status == "FINISHED" and op_status == "FINISHED":
-                await finalize_match(websocket, match_id, u_id_str, opponent_id, "NORMAL", my_score, op_score, opponent_name, user_repo)
-                continue
-            
-            
-
-        
-
-            # C. Score Syncing
-            # This keeps both players updated on each other's scores in real-time.
+            # D. LIVE SCORE SYNCING
             if my_score != last_sync_score or op_score != last_sync_op_score:
                 await websocket.send_json({
                     "type": "SYNC_STATE",

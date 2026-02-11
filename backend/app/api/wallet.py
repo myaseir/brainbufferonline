@@ -6,7 +6,8 @@ from app.models.deposit import DepositCreate, WithdrawalRequest
 from app.db.redis import redis_client  # 🚀 Shared Brain for Locking
 from bson import ObjectId
 from datetime import datetime, timezone
-
+from typing import List
+from datetime import datetime
 router = APIRouter()
 wallet_service = WalletService()
 user_repo = UserRepository()
@@ -82,7 +83,7 @@ async def request_withdrawal(data: WithdrawalRequest, current_user: dict = Depen
 @router.post("/referral/claim")
 async def claim_bonus(payload: dict, current_user = Depends(get_current_user)):
     """
-    Exposes the 50 PKR referral reward logic to the frontend.
+    Exposes the referral tracking logic to the frontend
     """
     code = payload.get("code")
     if not code:
@@ -105,3 +106,42 @@ async def claim_bonus(payload: dict, current_user = Depends(get_current_user)):
         # The balance for this user DOES NOT change, so just return the current value.
         "new_balance": current_user.get("wallet_balance", 0)
     }
+    
+@router.get("/history")
+async def get_transaction_history(current_user: dict = Depends(get_current_user)):
+    """
+    Fetches and combines both deposits and withdrawals into a single timeline.
+    """
+    db = user_repo.collection.database
+    user_id = ObjectId(current_user["id"])
+
+    # 1. Fetch latest 50 of each type
+    deposits = await db["deposits"].find({"user_id": user_id}).sort("created_at", -1).to_list(50)
+    withdrawals = await db["withdrawals"].find({"user_id": user_id}).sort("created_at", -1).to_list(50)
+
+    history = []
+    
+    # 2. Standardize Deposit objects
+    for d in deposits:
+        history.append({
+            "type": "DEPOSIT",
+            "amount": d["amount"],
+            "status": d["status"],
+            "trx_id": d.get("trx_id"),
+            "created_at": d["created_at"]
+        })
+
+    # 3. Standardize Withdrawal objects
+    for w in withdrawals:
+        history.append({
+            "type": "WITHDRAWAL",
+            "amount": w["amount"],
+            "status": w["status"],
+            "account_number": w.get("account_number"),
+            "created_at": w["created_at"]
+        })
+
+    # 4. Sort the combined list by date (newest first)
+    history.sort(key=lambda x: (x.get("status") == "PENDING", x.get("created_at", datetime.min)), reverse=True)
+    
+    return history
