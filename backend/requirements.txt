@@ -8,8 +8,7 @@ motor
 pymongo
 dnspython
 upstash-redis
-redis>=5.0.0      # 👈 ADD THIS for the Ultra-Efficient Logic
-hiredis>=2.2.0
+
 # Security & Authentication
 python-jose[cryptography]
 pyjwt  # 👈 THIS WAS MISSING
