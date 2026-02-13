@@ -3,6 +3,7 @@ from app.db.redis import redis_client
 from bson import ObjectId
 from datetime import datetime, timezone
 import logging
+import asyncio
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -388,4 +389,21 @@ class UserRepository:
         except Exception as e:
             logger.error(f"❌ Error fetching referral details for {referrer_id}: {e}")
             return []
+    
+    async def get_online_users_raw(self):
+        """
+        Fetches the raw JSON strings from the Redis Set using an executor 
+        to keep the event loop non-blocking.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            # We use the existing redis_client from your imports
+            return await loop.run_in_executor(
+                None, 
+                redis_client.smembers, 
+                "online_users_detailed"
+            )
+        except Exception as e:
+            logger.error(f"Redis Error in get_online_users_raw: {e}")
+            return set() # Return an empty set to prevent loop errors
         

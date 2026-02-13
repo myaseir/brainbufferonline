@@ -5,6 +5,7 @@ import json
 from app.db.redis import redis_client
 from datetime import datetime  # ✅ Fixed import
 import datetime as dt # Optional: if you need the whole module
+import asyncio
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -15,14 +16,25 @@ class LobbyManager:
         # ✅ Optimization: Track local presence to avoid redundant Redis calls
         self.local_presence: Dict[str, str] = {}
 
-    async def connect(self, user_id: str, websocket: WebSocket):
+    async def connect(self, user_id: str, websocket: WebSocket, username: str, email: str):
         await websocket.accept()
+        user_info = json.dumps({
+            "user_id": user_id,
+            "username": username,
+            "email": email,
+            "connected_at": datetime.now().isoformat()
+        })
+        
+        # 👇 NEW: Get the loop for non-blocking Redis calls
+        loop = asyncio.get_event_loop()
         
         if self.local_presence.get(user_id) != "online":
             try:
+                await loop.run_in_executor(None, redis_client.sadd, "online_users_detailed", user_info)
                 redis_client.set(f"user_status:{user_id}", "online", ex=3600)
                 await self.broadcast_user_status(user_id, "online")
-                self.local_presence[user_id] = "online"
+                # self.local_presence[user_id] = "online"
+                self.local_presence[user_id] = user_info
             except Exception as e:
                 logger.error(f"Redis Error in connect: {e}")
 
@@ -35,8 +47,19 @@ class LobbyManager:
         
         if user_id not in self.active_connections:
             try:
-                redis_client.delete(f"user_status:{user_id}")
+                loop = asyncio.get_event_loop()
+                
+                # 👇 NEW: Get the stored JSON string
+                user_info = self.local_presence.get(user_id)
+                
+                # 👇 NEW: Remove from Admin List
+                if user_info:
+                    await loop.run_in_executor(None, redis_client.srem, "online_users_detailed", user_info)
+
+                # Existing cleanup logic
+                await loop.run_in_executor(None, redis_client.delete, f"user_status:{user_id}")
                 await self.broadcast_user_status(user_id, "offline")
+                
                 if user_id in self.local_presence:
                     del self.local_presence[user_id]
             except Exception as e:

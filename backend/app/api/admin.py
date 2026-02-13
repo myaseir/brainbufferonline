@@ -79,8 +79,7 @@ async def get_health(admin: dict = Depends(get_current_admin)):
     # Real-time Metrics
     try:
         # Note: 'keys' is expensive in huge prod, but fine for <10k users on Upstash
-        online_keys = redis_client.keys("online:*")
-        total_online = len(online_keys)
+        total_online = redis_client.scard("online_users_detailed")
         
         active_match_keys = redis_client.keys("match:live:*")
         matches_count = len(active_match_keys)
@@ -330,3 +329,9 @@ async def get_user_referral_details(
         "referrals": details,
         "count": len(details)
     }
+
+@router.get("/online-players/list")
+async def get_online_players(admin: dict = Depends(get_current_admin)):
+    # The API just calls the Service
+    players = await auth_service.get_detailed_online_list()
+    return {"online_players": players}

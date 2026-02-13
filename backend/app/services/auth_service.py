@@ -144,3 +144,20 @@ class AuthService:
             redis_client.delete(f"user:email:{email}")
         
         return success
+    
+    async def get_detailed_online_list(self):
+        """
+        Fetches and parses the online list.
+        """
+        # Now self.user_repo will work!
+        raw_list = await self.repo.get_online_users_raw()
+        
+        online_players = []
+        for player in raw_list:
+            try:
+                import json
+                p_str = player.decode("utf-8") if isinstance(player, bytes) else player
+                online_players.append(json.loads(p_str))
+            except Exception:
+                continue
+        return online_players
