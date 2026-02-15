@@ -27,5 +27,3 @@ packaging==24.2
 requests
 httpx
 websockets
-bson
-pydantic
