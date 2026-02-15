@@ -144,6 +144,25 @@ async def get_online_players_list(admin: dict = Depends(get_current_admin)):
     except Exception as e:
         logger.error(f"Error fetching online list: {e}")
         return {"online_players": [], "error": str(e)}
+    
+@router.get("/active-matches/details")
+async def get_active_matches_details(admin: dict = Depends(get_current_admin)):
+    try:
+        # 1. Get all active match IDs from Redis
+        match_ids = redis_client.smembers("active_matches_set")
+        if not match_ids:
+            return {"active_matches": []}
+
+        active_matches = []
+        for mid in match_ids:
+            # 2. Get the match data stored in Redis (usually as a hash or JSON string)
+            match_data = redis_client.get(f"match:{mid.decode('utf-8')}")
+            if match_data:
+                active_matches.append(json.loads(match_data))
+
+        return {"active_matches": active_matches}
+    except Exception as e:
+        return {"error": str(e), "active_matches": []}
 
 # --- 👥 USER MANAGEMENT (MISSING IN YOUR CODE) ---
 @router.get("/users")

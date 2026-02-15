@@ -38,6 +38,12 @@ async def wait_for_match_ready(match_id: str, user_id: str, timeout: int = 30):
             # Only start the game if the opponent has connected and set their name
             if opponent_id:
                 logger.info(f"Match {match_id} Ready: {user_id} vs {opponent_name}")
+                
+                # 🚀 ADD THIS: Save details for Admin Dashboard
+                match_info = {"id": match_id, "p1_name": user_id, "p2_name": opponent_name, "stake": 50} # Adjust stake as needed
+                redis_client.set(f"match_details:{match_id}", json.dumps(match_info), ex=1800)
+                redis_client.sadd("active_matches_set", match_id)
+                
                 return json.loads(rounds_json), opponent_name, opponent_id
 
         # 3. Adaptive polling: Wait 1s between checks to save Upstash quota
@@ -56,6 +62,8 @@ async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_sco
     
     if locked:
         logger.info(f"🏁 Finalizing match {match_id}. Reason: {result_type}")
+        redis_client.srem("active_matches_set", match_id)
+        redis_client.delete(f"match_details:{match_id}")
         
         raw_data = await asyncio.to_thread(redis_client.hgetall, match_key)
         match_data = {to_str(k): to_str(v) for k, v in raw_data.items()}
