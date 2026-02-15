@@ -10,11 +10,13 @@ import json
 from app.services.auth_service import AuthService
 from app.services.lobby_manager import lobby_manager
 from app.repositories.match_repo import MatchRepository
+import logging
 router = APIRouter()
 user_repo = UserRepository()
 wallet_service = WalletService()
 match_repo = MatchRepository()
 auth_service = AuthService()
+logger = logging.getLogger("uvicorn.error")
 # --- 📊 ANALYTICS ---
 @router.get("/revenue/today")
 async def get_revenue(admin: dict = Depends(get_current_admin)):
@@ -67,25 +69,29 @@ async def get_revenue(admin: dict = Depends(get_current_admin)):
 async def get_health(admin: dict = Depends(get_current_admin)):
     db = user_repo.collection.database
     
-    # Database Check
+    # 1. Initialize variables with default values first
+    db_status = "Offline"
+    reg_users = 0
+    total_online = 0
+    matches_count = 0
+    
+    # 2. Database Check
     try:
         await db.command("ping")
         db_status = "Online"
         reg_users = await db["users"].estimated_document_count()
-    except Exception:
-        db_status = "Offline"
-        reg_users = 0
+    except Exception as e:
+        logger.error(f"DB Health Check Failed: {e}")
+        # db_status and reg_users remain at defaults
         
-    # Real-time Metrics
+    # 3. Real-time Metrics (Using the new Set approach)
     try:
-        # Note: 'keys' is expensive in huge prod, but fine for <10k users on Upstash
-        total_online = redis_client.scard("online_users_detailed")
+        # Optimized: Get count from the Set instead of scanning keys
+        total_online = redis_client.scard("online_players_set")
         
-        active_match_keys = redis_client.keys("match:live:*")
-        matches_count = len(active_match_keys)
-    except Exception:
-        total_online = 0
-        matches_count = 0
+        matches_count = redis_client.scard("active_matches_set")
+    except Exception as e:
+        logger.error(f"Redis Health Check Failed: {e}")
     
     return {
         "status": "Healthy",
@@ -95,6 +101,49 @@ async def get_health(admin: dict = Depends(get_current_admin)):
             "total_players_online": total_online
         }
     }
+# app/api/admin.py
+
+@router.get("/online-players/list")
+async def get_online_players_list(admin: dict = Depends(get_current_admin)):
+    try:
+        # 1. Get all user IDs from the Redis Set
+        online_ids = redis_client.smembers("online_players_set")
+        if not online_ids:
+            return {"online_players": []}
+
+        # 2. Convert IDs to ObjectIds for MongoDB
+        # We decode from bytes (Redis returns bytes) and skip non-valid IDs
+        from bson import ObjectId
+        valid_oids = []
+        for uid in online_ids:
+            decoded_id = uid.decode('utf-8') if isinstance(uid, bytes) else uid
+            if ObjectId.is_valid(decoded_id):
+                valid_oids.append(ObjectId(decoded_id))
+
+        # 3. Fetch user details from MongoDB in ONE batch
+        db = user_repo.collection.database
+        users_cursor = db["users"].find(
+            {"_id": {"$in": valid_oids}},
+            {"username": 1, "email": 1, "created_at": 1} # Only fetch needed fields
+        )
+        users_data = await users_cursor.to_list(length=100)
+
+        # 4. Format for the frontend table
+        online_players = []
+        for u in users_data:
+            online_players.append({
+                "user_id": str(u["_id"]),
+                "username": u.get("username", "Unknown"),
+                "email": u.get("email", "N/A"),
+                # We use created_at as a fallback if connected_at isn't stored
+                "connected_at": datetime.now(timezone.utc).isoformat() 
+            })
+
+        return {"online_players": online_players}
+
+    except Exception as e:
+        logger.error(f"Error fetching online list: {e}")
+        return {"online_players": [], "error": str(e)}
 
 # --- 👥 USER MANAGEMENT (MISSING IN YOUR CODE) ---
 @router.get("/users")
@@ -309,29 +358,3 @@ async def admin_referral_leaderboard(
     )
     
     return result
-
-
-@router.get("/referral/{user_id}/details")
-async def get_user_referral_details(
-    user_id: str, 
-    admin: dict = Depends(get_current_admin)
-):
-    """
-    Detailed audit: Shows the names and join dates of everyone 
-    referred by a specific user.
-    """
-    # Use the new repo function we just added
-    details = await user_repo.get_referred_users_details(user_id)
-    
-    return {
-        "status": "success",
-        "referrer_id": user_id,
-        "referrals": details,
-        "count": len(details)
-    }
-
-@router.get("/online-players/list")
-async def get_online_players(admin: dict = Depends(get_current_admin)):
-    # The API just calls the Service
-    players = await auth_service.get_detailed_online_list()
-    return {"online_players": players}

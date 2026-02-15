@@ -8,7 +8,7 @@ from app.services.game_redis import get_user_from_token
 from app.services.lobby_manager import lobby_manager
 from app.services.wallet_service import WalletService
 from app.db.redis import redis_client
-from app.repositories.user_repo import UserRepository
+
 router = APIRouter()
 logger = logging.getLogger("uvicorn.error")
 
@@ -23,26 +23,16 @@ async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
     if not user_id:
         await websocket.close(code=4001)
         return
-    
-    user_repo = UserRepository()
-    user = await user_repo.get_by_id(user_id)
-    
-    # Safe defaults in case user is missing fields
-    username = user.get("username", "Unknown") if user else "Unknown"
-    email = user.get("email", "") if user else ""
+
     # 2. Connect to Lobby Manager
-    await lobby_manager.connect(
-    user_id=user_id, 
-    websocket=websocket, 
-    username=username, 
-    email=email
-)
+    await lobby_manager.connect(user_id, websocket)
 
     # 🚀 3. HEARTBEAT TASK
     async def heartbeat():
         try:
             while True:
                 await asyncio.sleep(25)
+                redis_client.expire(f"user_status:{user_id}", 120)
                 await websocket.send_json({"type": "ping"})
         except asyncio.CancelledError:
             pass

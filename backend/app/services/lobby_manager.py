@@ -5,7 +5,6 @@ import json
 from app.db.redis import redis_client
 from datetime import datetime  # ✅ Fixed import
 import datetime as dt # Optional: if you need the whole module
-import asyncio
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -16,56 +15,39 @@ class LobbyManager:
         # ✅ Optimization: Track local presence to avoid redundant Redis calls
         self.local_presence: Dict[str, str] = {}
 
-    async def connect(self, user_id: str, websocket: WebSocket, username: str, email: str):
+    async def connect(self, user_id: str, websocket: WebSocket):
         await websocket.accept()
-        user_info = json.dumps({
-            "user_id": user_id,
-            "username": username,
-            "email": email,
-            "connected_at": datetime.now().isoformat()
-        })
+    
+        try:
+        # 1. Add to the global 'online_players' Set
+            redis_client.sadd("online_players_set", user_id)
         
-        # 👇 NEW: Get the loop for non-blocking Redis calls
-        loop = asyncio.get_event_loop()
+        # 2. Keep your individual status key for profile lookups (Optional)
+            redis_client.set(f"user_status:{user_id}", "online", ex=3600)
         
-        if self.local_presence.get(user_id) != "online":
-            try:
-                await loop.run_in_executor(None, redis_client.sadd, "online_users_detailed", user_info)
-                redis_client.set(f"user_status:{user_id}", "online", ex=3600)
-                await self.broadcast_user_status(user_id, "online")
-                # self.local_presence[user_id] = "online"
-                self.local_presence[user_id] = user_info
-            except Exception as e:
-                logger.error(f"Redis Error in connect: {e}")
+            await self.broadcast_user_status(user_id, "online")
+            self.local_presence[user_id] = "online"
+        except Exception as e:
+            logger.error(f"Redis Error in connect: {e}")
 
         self.active_connections[user_id] = websocket
-        logger.info(f"✅ User {user_id} connected to Lobby")
 
     async def disconnect(self, user_id: str):
         if user_id in self.active_connections:
             del self.active_connections[user_id]
+    
+        try:
+        # 1. Remove from the global Set
+            redis_client.srem("online_players_set", user_id)
         
-        if user_id not in self.active_connections:
-            try:
-                loop = asyncio.get_event_loop()
-                
-                # 👇 NEW: Get the stored JSON string
-                user_info = self.local_presence.get(user_id)
-                
-                # 👇 NEW: Remove from Admin List
-                if user_info:
-                    await loop.run_in_executor(None, redis_client.srem, "online_users_detailed", user_info)
-
-                # Existing cleanup logic
-                await loop.run_in_executor(None, redis_client.delete, f"user_status:{user_id}")
-                await self.broadcast_user_status(user_id, "offline")
-                
-                if user_id in self.local_presence:
-                    del self.local_presence[user_id]
-            except Exception as e:
-                logger.error(f"Redis Error in disconnect: {e}")
-            
-            logger.info(f"❌ User {user_id} disconnected from Lobby")
+        # 2. Delete individual status
+            redis_client.delete(f"user_status:{user_id}")
+        
+            await self.broadcast_user_status(user_id, "offline")
+            if user_id in self.local_presence:
+                del self.local_presence[user_id]
+        except Exception as e:
+            logger.error(f"Redis Error in disconnect: {e}")
 
     async def broadcast_user_status(self, user_id: str, status: str):
         payload = {
