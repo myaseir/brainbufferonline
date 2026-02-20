@@ -27,3 +27,4 @@ packaging==24.2
 requests
 httpx
 websockets
+httpx

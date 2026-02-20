@@ -11,7 +11,10 @@ from app.services.game_redis import (
     redis_lock_user, 
     redis_release_lock
 )
+import httpx
+import os
 
+BOT_SERVER_URL = os.getenv("BOT_SERVER_URL", "http://127.0.0.1:10000")
 logger = logging.getLogger("uvicorn.error")
 
 async def matchmaking_endpoint(websocket: WebSocket, token: str = Query(...)):
@@ -108,11 +111,22 @@ async def matchmaking_endpoint(websocket: WebSocket, token: str = Query(...)):
                 }
             )
             await asyncio.to_thread(redis_client.expire, match_key, 600)
+            logger.info(f"📡 Sending wake-up call to Bot Server for match {match_id}")
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"{BOT_SERVER_URL}/spawn-bot", 
+                        json={"match_id": match_id},
+                        timeout=5.0
+                    )
+            except Exception as bot_err:
+                logger.error(f"⚠️ Failed to wake up bot: {bot_err}")
 
             await websocket.send_json({"type": "MATCH_FOUND", "match_id": match_id})
             matched_successfully = True
             return
 
+            
     except Exception as e:
         logger.error(f"WebSocket Matchmaking Error: {e}")
         try:
@@ -126,6 +140,7 @@ async def matchmaking_endpoint(websocket: WebSocket, token: str = Query(...)):
         
         # If we didn't confirm a successful match, we MUST attempt a refund
         if not matched_successfully:
+            
             try:
                 # Attempt to remove from pool
                 removed = await redis_mgr.remove_from_matchmaking(u_id_str)

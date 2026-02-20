@@ -38,12 +38,15 @@ async def wait_for_match_ready(match_id: str, user_id: str, timeout: int = 30):
             # Only start the game if the opponent has connected and set their name
             if opponent_id:
                 logger.info(f"Match {match_id} Ready: {user_id} vs {opponent_name}")
-                
+                from app.services.lobby_manager import lobby_manager
+                await lobby_manager.broadcast_user_status(user_id, "playing")
                 # 🚀 ADD THIS: Save details for Admin Dashboard
                 match_info = {"id": match_id, "p1_name": user_id, "p2_name": opponent_name, "stake": 50} # Adjust stake as needed
                 redis_client.set(f"match_details:{match_id}", json.dumps(match_info), ex=1800)
                 redis_client.sadd("active_matches_set", match_id)
-                
+                redis_client.set(f"user_status:{user_id}", "playing", ex=600)
+                redis_client.incr(f"conn_count:{user_id}")
+                logger.info(f"Match {match_id} Ready: {user_id} vs {opponent_name}")
                 return json.loads(rounds_json), opponent_name, opponent_id
 
         # 3. Adaptive polling: Wait 1s between checks to save Upstash quota
@@ -64,6 +67,13 @@ async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_sco
         logger.info(f"🏁 Finalizing match {match_id}. Reason: {result_type}")
         redis_client.srem("active_matches_set", match_id)
         redis_client.delete(f"match_details:{match_id}")
+        new_count = redis_client.decr(f"conn_count:{user_id}")
+        if new_count > 0:
+            redis_client.set(f"user_status:{user_id}", "online", ex=3600)
+        else:
+    # If this was their only open socket, they are truly gone
+            redis_client.delete(f"user_status:{user_id}")
+            redis_client.srem("online_players_set", user_id)
         
         raw_data = await asyncio.to_thread(redis_client.hgetall, match_key)
         match_data = {to_str(k): to_str(v) for k, v in raw_data.items()}

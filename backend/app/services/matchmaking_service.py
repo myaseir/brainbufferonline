@@ -8,11 +8,16 @@ from fastapi import HTTPException
 from app.repositories.match_repo import MatchRepository
 from app.repositories.user_repo import UserRepository
 from app.db.redis import redis_client
+import httpx # Add this at the top of your file
+import os
+
 
 # Set up logging to catch those Upstash errors
 logger = logging.getLogger("uvicorn.error")
-
+BOT_SERVER_URL = os.getenv("BOT_SERVER_URL", "http://127.0.0.1:10000")
 class MatchmakingService:
+    
+  
     def __init__(self):
         self.match_repo = MatchRepository()
         self.user_repo = UserRepository()
@@ -70,7 +75,7 @@ class MatchmakingService:
                 try:
                     redis_client.sadd("matchmaking_pool", user_id)
 
-                    # 🔥 NEW: 3-SECOND WAIT FOR HUMAN
+                    # Wait for a human for 3 seconds
                     for _ in range(3):
                         await asyncio.sleep(1)
                         # Check if a human 'popped' us while we were sleeping
@@ -79,11 +84,13 @@ class MatchmakingService:
                             match_id = notif.decode() if isinstance(notif, bytes) else notif
                             return {"status": "MATCHED", "match_id": match_id}
 
-                    # 🔥 NEW: BOT FALLBACK (After 3 seconds)
-                    # 1. Remove user from human pool
+                    # 🔥 BOT FALLBACK STARTS HERE 🔥
+                    # If we reached here, no human was found in 3 seconds.
+                    
+                    # 1. Remove user from human pool so a human doesn't join late
                     redis_client.srem("matchmaking_pool", user_id)
                     
-                    # 2. Pick a random Pakistani Bot (BOT_001 to BOT_020)
+                    # 2. Pick a random Bot ID
                     bot_num = random.randint(1, 20)
                     bot_id = f"BOT_{bot_num:03d}"
                     match_id = f"match_{uuid.uuid4().hex[:8]}"
@@ -92,13 +99,17 @@ class MatchmakingService:
                     await self.match_repo.create_match_record(match_id, bot_id, user_id, 50.0)
                     
                     match_key = f"match:live:{match_id}"
-                    redis_client.hset(match_key, values={
+                    redis_client.hset(match_key, mapping={ 
                         "p1_id": user_id,
                         "p2_id": bot_id,
                         "status": "CREATED",
                         "bet_amount": "50.0"
                     })
                     redis_client.expire(match_key, 600)
+
+                    # ✅ TRIGGER THE BOT: Wake it up via HTTP
+                    # We use create_task so we don't block the user's response
+                    asyncio.create_task(self.trigger_bot_spawn(match_id))
 
                     return {
                         "status": "MATCHED",
@@ -148,6 +159,7 @@ class MatchmakingService:
                 match_id = notif.decode() if isinstance(notif, bytes) else str(notif)
                 match_key = f"match:live:{match_id}"
                 
+                
                 # Check if the user has posted any score yet
                 has_score = redis_client.hexists(match_key, f"score:{user_id}")
                 
@@ -165,3 +177,20 @@ class MatchmakingService:
         except Exception as e:
             logger.error(f"Cancel Matchmaking Error: {e}")
             raise HTTPException(status_code=500, detail="Service unavailable. Could not verify refund.")
+        
+    async def trigger_bot_spawn(self, match_id: str):
+        print(f"DEBUG: Attempting to wake up bot for {match_id}...") # Standard print always shows
+        bot_url = f"{BOT_SERVER_URL}/spawn-bot"
+    
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                bot_url, 
+                json={"match_id": match_id},
+                timeout=5.0
+            )
+            print(f"DEBUG: Bot Server responded with: {response.status_code}")
+            logger.info(f"🚀 Bot Triggered successfully for match: {match_id}")
+        except Exception as e:
+            print(f"DEBUG: CRITICAL BOT TRIGGER FAILURE: {e}")
+            logger.error(f"⚠️ Failed to trigger bot: {e}")

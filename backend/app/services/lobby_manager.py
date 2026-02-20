@@ -3,8 +3,9 @@ from typing import Dict
 import logging
 import json
 from app.db.redis import redis_client
-from datetime import datetime  # ✅ Fixed import
-import datetime as dt # Optional: if you need the whole module
+from datetime import datetime
+import asyncio
+from app.services.game_utils import to_str
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -12,40 +13,58 @@ class LobbyManager:
     def __init__(self):
         # Maps user_id -> WebSocket connection
         self.active_connections: Dict[str, WebSocket] = {}
-        # ✅ Optimization: Track local presence to avoid redundant Redis calls
+        # Track local presence
         self.local_presence: Dict[str, str] = {}
 
     async def connect(self, user_id: str, websocket: WebSocket):
         await websocket.accept()
+        self.active_connections[user_id] = websocket
     
         try:
-        # 1. Add to the global 'online_players' Set
-            redis_client.sadd("online_players_set", user_id)
-        
-        # 2. Keep your individual status key for profile lookups (Optional)
-            redis_client.set(f"user_status:{user_id}", "online", ex=3600)
-        
-            await self.broadcast_user_status(user_id, "online")
-            self.local_presence[user_id] = "online"
+            # --- SOLUTION A: REFERENCE COUNTING ---
+            # Increment the number of active sockets for this user (Lobby + Game)
+            conn_count = redis_client.incr(f"conn_count:{user_id}")
+            # Set a safety expiry on the counter (1 hour)
+            redis_client.expire(f"conn_count:{user_id}", 3600)
+
+            # Only broadcast 'online' if this is their FIRST connection
+            if conn_count == 1:
+                redis_client.sadd("online_players_set", user_id)
+                redis_client.set(f"user_status:{user_id}", "online", ex=3600)
+                await self.broadcast_user_status(user_id, "online")
+                self.local_presence[user_id] = "online"
+            
         except Exception as e:
             logger.error(f"Redis Error in connect: {e}")
 
-        self.active_connections[user_id] = websocket
-
     async def disconnect(self, user_id: str):
+        # Remove from local dict first to stop message sending attempts
         if user_id in self.active_connections:
             del self.active_connections[user_id]
     
         try:
-        # 1. Remove from the global Set
-            redis_client.srem("online_players_set", user_id)
-        
-        # 2. Delete individual status
-            redis_client.delete(f"user_status:{user_id}")
-        
-            await self.broadcast_user_status(user_id, "offline")
-            if user_id in self.local_presence:
-                del self.local_presence[user_id]
+            # --- SOLUTION A: REFERENCE COUNTING ---
+            # Decrement the socket count
+            conn_count = redis_client.decr(f"conn_count:{user_id}")
+
+            # Fetch current status to check if they are playing
+            raw_status = redis_client.get(f"user_status:{user_id}")
+            status = to_str(raw_status)
+
+            # ONLY mark offline if this was the last remaining socket
+            if conn_count <= 0:
+                print(f"📡 DISCONNECT LOG: User {user_id} has 0 connections. Marking Offline.")
+                
+                redis_client.srem("online_players_set", user_id)
+                redis_client.delete(f"user_status:{user_id}")
+                redis_client.delete(f"conn_count:{user_id}") # Clean up counter
+                
+                await self.broadcast_user_status(user_id, "offline")
+                if user_id in self.local_presence:
+                    del self.local_presence[user_id]
+            else:
+                print(f"🛡️ PRESERVING STATUS: {user_id} still has {conn_count} socket(s) open.")
+
         except Exception as e:
             logger.error(f"Redis Error in disconnect: {e}")
 
@@ -56,17 +75,19 @@ class LobbyManager:
             "status": status
         }
         
-        disconnected_users = []
-        for uid, socket in self.active_connections.items():
+        # ✅ FIXED: Using list() to prevent "dictionary changed size" error
+        active_uids = list(self.active_connections.keys())
+        
+        for uid in active_uids:
             if uid == user_id:
                 continue
-            try:
-                await socket.send_json(payload)
-            except Exception:
-                disconnected_users.append(uid)
-        
-        for uid in disconnected_users:
-            await self.disconnect(uid)
+            socket = self.active_connections.get(uid)
+            if socket:
+                try:
+                    await socket.send_json(payload)
+                except Exception:
+                    # Don't call disconnect inside the loop; it's handled by the ping/pong or error catchers
+                    pass
 
     async def send_personal_message(self, message: dict, user_id: str):
         if user_id in self.active_connections:
@@ -76,28 +97,24 @@ class LobbyManager:
                 return True
             except Exception as e:
                 logger.error(f"⚠️ Failed to send lobby message to {user_id}: {e}")
-                await self.disconnect(user_id)
+                # Use a background task or safe deletion
                 return False
         return False
     
-    # ✅ FIXED: Now properly indented inside the class
-    async def broadcast_global_announcement(self, message: str):
-        """
-        Sends a system-wide alert to every user currently in the lobby.
-        """
-        payload = {
-            "type": "GLOBAL_ANNOUNCEMENT",
-            "message": message,
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        # Send to all connected sockets
-        for user_id, socket in self.active_connections.items():
-            try:
-                await socket.send_json(payload)
-            except Exception:
-                # Heartbeat or future logic will clean up dead sockets
-                continue
+    async def update_status(self, user_id: str, status: str):
+        """Used to manually change status to 'playing' or 'online'"""
+        try:
+            if status == "offline":
+                await self.disconnect(user_id)
+            else:
+                expiry = 600 if status == "playing" else 120
+                redis_client.set(f"user_status:{user_id}", status, ex=expiry)
+                redis_client.sadd("online_players_set", user_id)
+                
+                await self.broadcast_user_status(user_id, status)
+                self.local_presence[user_id] = status
+        except Exception as e:
+            logger.error(f"Status Update Error: {e}")
 
 # Global instance
 lobby_manager = LobbyManager()

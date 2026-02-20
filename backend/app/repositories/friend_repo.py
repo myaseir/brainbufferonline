@@ -51,45 +51,39 @@ class FriendRepository:
         return result.modified_count > 0
 
     async def get_friends(self, user_id: str):
-        """
-        🚀 OPTIMIZED: Fetches profiles AND live status from Redis.
-        """
-        # 1. Get all accepted friendship documents
+    # 1. Get accepted friendships
         cursor = self.collection.find({
             "$or": [{"requester_id": user_id}, {"recipient_id": user_id}],
             "status": "accepted"
-        })
-        
+            })
         friendship_docs = await cursor.to_list(length=200)
-        if not friendship_docs:
-            return []
+        if not friendship_docs: return []
 
-        # 2. Extract unique friend IDs
-        friend_ids = []
-        for doc in friendship_docs:
-            fid = doc["recipient_id"] if doc["requester_id"] == user_id else doc["requester_id"]
-            friend_ids.append(ObjectId(fid))
-
-        # 3. Batch Fetch Profiles
+    # 2. Extract IDs and fetch profiles
+        friend_ids = [ObjectId(d["recipient_id"] if d["requester_id"] == user_id else d["requester_id"]) for d in friendship_docs]
         profiles = await self.users.find({"_id": {"$in": friend_ids}}).to_list(length=200)
-        
-        # 4. ⚡ FETCH LIVE STATUS FROM REDIS
+
+    # 3. ⚡ BATCH FETCH STATUS (Professional & Efficient)
+    # Get everyone who is NOT offline in one command
+        online_set = redis_client.smembers("online_players_set") or []
+    
         results = []
         for u in profiles:
             u_id = str(u["_id"])
-            
-            # Check Redis for status (e.g., "user_status:12345" -> "online")
-            # Note: Ensure your LobbyManager sets this key in Redis!
-            status = redis_client.get(f"user_status:{u_id}")
-            
+            current_status = "offline"  # Default logic
+        
+            if u_id in online_set:
+                # This only hits Redis if the user is in the online set
+                status_val = redis_client.get(f"user_status:{u_id}")
+                current_status = to_str(status_val) if status_val else "online"
+
             results.append({
                 "id": u_id,
                 "username": u.get("username", "Unknown"),
                 "avatar": u.get("avatar_url", "/default-avatar.png"),
-                "status": to_str(status) if status else "offline" # ✅ Default to offline
+                "status": current_status 
             })
-            
-        return results
+        return results # This must be outside the loop
 
     async def get_pending_requests(self, user_id: str):
         """

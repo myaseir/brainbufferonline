@@ -8,7 +8,7 @@ from app.services.game_redis import get_user_from_token
 from app.services.lobby_manager import lobby_manager
 from app.services.wallet_service import WalletService
 from app.db.redis import redis_client
-
+from app.services.game_utils import to_str
 router = APIRouter()
 logger = logging.getLogger("uvicorn.error")
 
@@ -26,16 +26,19 @@ async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
 
     # 2. Connect to Lobby Manager
     await lobby_manager.connect(user_id, websocket)
-
+    await lobby_manager.update_status(user_id, "online")
     # 🚀 3. HEARTBEAT TASK
     async def heartbeat():
         try:
             while True:
                 await asyncio.sleep(25)
-                redis_client.expire(f"user_status:{user_id}", 120)
+                # 🛡️ Only refresh if NOT playing
+                raw = redis_client.get(f"user_status:{user_id}")
+                # Use to_str to handle byte strings from Upstash
+                if to_str(raw) != "playing":
+                    redis_client.expire(f"user_status:{user_id}", 120)
+                
                 await websocket.send_json({"type": "ping"})
-        except asyncio.CancelledError:
-            pass
         except Exception:
             pass
 
@@ -113,6 +116,8 @@ async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
                 # C. Success: Register Match in Redis
                 match_id = f"match_{uuid.uuid4().hex[:8]}"
                 match_key = f"match:live:{match_id}"
+                await lobby_manager.update_status(user_id, "playing")
+                await lobby_manager.update_status(challenger_id, "playing")
 
                 # ✅ FIXED: Flattening the dictionary for Upstash compatibility
                 # We pass the key-value pairs directly into hset
@@ -145,4 +150,16 @@ async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
     finally:
         if not heartbeat_task.done():
             heartbeat_task.cancel()
+        
         await lobby_manager.disconnect(user_id)
+        
+        # 🛡️ PROTECT "PLAYING" STATUS
+        # Run sync Redis call in thread for Upstash compatibility
+        current_status = await asyncio.to_thread(redis_client.get, f"user_status:{user_id}")
+        current_status = to_str(current_status)
+
+        if current_status != "playing":
+            # Only set offline if they weren't in a match
+            await lobby_manager.update_status(user_id, "offline")
+        else:
+            logger.info(f"User {user_id} disconnected from lobby but is 'playing'. Keeping status.")
