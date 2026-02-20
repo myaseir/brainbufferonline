@@ -65,6 +65,20 @@ async def matchmaking_endpoint(websocket: WebSocket, token: str = Query(...)):
             await match_repo.create_match_record(match_id, opponent_id, u_id_str, 50.0)
             await asyncio.to_thread(redis_client.set, f"notify:{opponent_id}", match_id, ex=300)
             
+            # 🔥 ADD THIS: Create the live key for Human vs Human matches
+            match_key = f"match:live:{match_id}"
+            await asyncio.to_thread(
+                redis_client.hset, 
+                match_key, 
+                values={ # Use 'mapping' to be safe
+                    "p1_id": u_id_str,
+                    "p2_id": opponent_id,
+                    "status": "CREATED",
+                    "bet_amount": "50.0"
+                }
+            )
+            await asyncio.to_thread(redis_client.expire, match_key, 120) # Match the 120s expiry
+            
             await websocket.send_json({"type": "MATCH_FOUND", "match_id": match_id})
             matched_successfully = True
             return
@@ -110,7 +124,7 @@ async def matchmaking_endpoint(websocket: WebSocket, token: str = Query(...)):
                     "bet_amount": "50.0"
                 }
             )
-            await asyncio.to_thread(redis_client.expire, match_key, 600)
+            await asyncio.to_thread(redis_client.expire, match_key, 120)
             logger.info(f"📡 Sending wake-up call to Bot Server for match {match_id}")
             try:
                 async with httpx.AsyncClient() as client:
