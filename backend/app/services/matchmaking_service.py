@@ -76,20 +76,13 @@ class MatchmakingService:
                     redis_client.sadd("matchmaking_pool", user_id)
 
                     # Wait for a human for 3 seconds
-                    for _ in range(5):
+                    for _ in range(3):
                         await asyncio.sleep(1)
+                        # Check if a human 'popped' us while we were sleeping
                         notif = redis_client.get(f"notify:{user_id}")
-                    if notif:
-                        return {"status": "MATCHED", "match_id": notif.decode()}
-
-    # 3. ATTEMPT TO LEAVE POOL FOR BOT
-    # If srem returns 0, someone else popped us right as we timed out!
-                    if redis_client.srem("matchmaking_pool", user_id) == 0:
-        # Wait a split second for the notification to arrive
-                        await asyncio.sleep(0.5)
-                        notif = redis_client.get(f"notify:{user_id}")
-                    if notif:
-                        return {"status": "MATCHED", "match_id": notif.decode()}
+                        if notif:
+                            match_id = notif.decode() if isinstance(notif, bytes) else notif
+                            return {"status": "MATCHED", "match_id": match_id}
 
                     # 🔥 BOT FALLBACK STARTS HERE 🔥
                     # If we reached here, no human was found in 3 seconds.
