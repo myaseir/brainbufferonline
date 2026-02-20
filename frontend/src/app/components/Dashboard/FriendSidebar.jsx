@@ -28,14 +28,19 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
       
       if (Array.isArray(data)) {
         const mapped = data.map(f => ({
-            ...f,
-            is_online: f.status === 'online'
-        }));
+    ...f,
+    is_online: f.status === 'online',
+    is_playing: f.status === 'playing' // ✅ New status
+}));
 
-        const sorted = mapped.sort((a, b) => {
-            if (a.is_online === b.is_online) return 0;
-            return a.is_online ? -1 : 1;
-        });
+const sorted = mapped.sort((a, b) => {
+    // Sort order: Online first, then Playing, then Offline
+    if (a.status === b.status) return 0;
+    if (a.status === 'online') return -1;
+    if (b.status === 'online') return 1;
+    if (a.status === 'playing') return -1;
+    return 1;
+});
 
         setFriends(sorted);
       }
@@ -242,12 +247,20 @@ const FriendSidebar = ({ isOpen, onClose, currentUser, onRequestCountChange }) =
                     <div className="flex items-center gap-3">
                         <div className="relative">
                             <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 font-bold uppercase">{f.username[0]}</div>
-                            <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${f.is_online ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                            <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white 
+    ${f.status === 'online' ? 'bg-emerald-500 animate-pulse' : 
+      f.status === 'playing' ? 'bg-amber-500' : 'bg-slate-300'}`} 
+/>
                         </div>
                         <div>
-                            <p className="text-sm font-bold text-slate-700">{f.username}</p>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{f.is_online ? 'Online' : 'Offline'}</p>
-                        </div>
+    <p className="text-sm font-bold text-slate-700">{f.username}</p>
+    <p className={`text-[10px] font-bold uppercase tracking-wider ${
+        f.status === 'online' ? 'text-emerald-500' : 
+        f.status === 'playing' ? 'text-amber-500' : 'text-slate-400'
+    }`}>
+        {f.status}
+    </p>
+</div>
                     </div>
                     {f.is_online && (
                         <button 
