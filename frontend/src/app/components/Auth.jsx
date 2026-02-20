@@ -6,7 +6,7 @@ import {
   Mail, Lock, User, ShieldCheck, ArrowRight, 
   RefreshCcw, RotateCcw, Smartphone, Scale, BookOpen, ChevronDown 
 } from 'lucide-react';
-import { getBrowserFingerprint } from '../utils/fingerprint';
+import { getDeviceIdentifier as getBrowserFingerprint } from '../utils/fingerprint';
 import ForgetPassword from './ForgotPassword';
 import Link from 'next/link';
 
