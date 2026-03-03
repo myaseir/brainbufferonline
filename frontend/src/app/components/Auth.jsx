@@ -417,22 +417,38 @@ const handleLogin = async (e) => {
   </button>
 </div>
       {/* 4. FOOTER */}
-      <footer className="py-12 md:py-16 px-6 bg-white">
-        <div className="max-w-4xl mx-auto text-center">
-          <p className="text-[8px] md:text-[10px] font-black uppercase tracking-[0.4em] text-slate-300 mb-4 md:mb-6">Glacia Connection Deployment</p>
-          <p className="text-[10px] md:text-xs text-slate-500 leading-relaxed max-w-xl mx-auto italic">
-            BrainBuffer is a premier eSports platform powered by 
-            <span className="text-slate-900 font-bold ml-1">Glacia Connection</span>, 
-            the technology division of our SECP-registered corporate entity. 
-            Dedicated to fostering cognitive excellence and skill-based digital solutions for Pakistan’s youth.
-          </p>
-          <div className="mt-8 pt-8 border-t border-slate-100 flex flex-wrap justify-center gap-4 md:gap-8">
-            <span className="text-[8px] md:text-[9px] font-black uppercase tracking-widest text-slate-300">© 2026 Glacia Connection</span>
-            <Link href="/privacy" className="text-[8px] md:text-[9px] font-black uppercase tracking-widest text-slate-400 hover:text-green-500 transition-colors">Privacy Policy</Link>
-            <Link href="/terms" className="text-[8px] md:text-[9px] font-black uppercase tracking-widest text-slate-400 hover:text-green-500 transition-colors">Terms of Service</Link>
-          </div>
-        </div>
-      </footer>
+     <footer className="py-12 md:py-16 px-6 bg-white border-t border-slate-100">
+  <div className="max-w-4xl mx-auto text-center">
+    <p className="text-[9px] md:text-[11px] font-black uppercase tracking-[0.4em] text-slate-300 mb-4 md:mb-6">
+      Glacia Connection Deployment
+    </p>
+    
+    <p className="text-[11px] md:text-sm text-slate-500 leading-relaxed max-w-2xl mx-auto italic">
+      BrainBuffer is a premier eSports platform powered by 
+      <Link 
+        href="https://glacialabs.com" 
+        target="_blank" 
+        className="text-emerald-600 font-bold ml-1 hover:text-emerald-400 transition-colors underline decoration-emerald-600/20 underline-offset-4"
+      >
+        Glacia Labs
+      </Link>, 
+      the technology division of our SECP-registered corporate entity. 
+      Dedicated to fostering cognitive excellence and skill-based digital solutions for Pakistan’s youth.
+    </p>
+
+    <div className="mt-8 pt-8 border-t border-slate-100 flex flex-wrap justify-center items-center gap-4 md:gap-8">
+      {/* Updated Copyright & Credit */}
+      <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-400">
+        © 2026 Glacia Connection
+      </span>
+      
+      <div className="h-1 w-1 bg-slate-200 rounded-full hidden md:block" />
+      
+      <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-400">
+        Developed by{" "}
+        <Link 
+          href="https://glacialabs.com" 
+          className="text-emerald-600 hover:text-emerald-50
 
     </div>
   );
