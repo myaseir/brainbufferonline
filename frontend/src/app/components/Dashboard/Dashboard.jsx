@@ -80,7 +80,7 @@ useEffect(() => {
 }, []); // 👈 IMPORTANT: Empty array [] means this runs ONCE on mount
 
   // 🚀 FIX: Missing "Insufficient Funds" Protection Logic
-  const canPlayRanked = (localUser?.wallet_balance || 0) >= 50;
+  const canPlayRanked = (localUser?.wallet_balance || 0) >= 100;
 
   const handleDeposit = async (e) => {
     e.preventDefault();
@@ -244,7 +244,7 @@ useEffect(() => {
                       {canPlayRanked ? "Ranked Match" : "Top Up Wallet"}
                     </span>
                     <span className={`text-[10px] font-bold uppercase tracking-widest ${canPlayRanked ? 'text-white opacity-90' : 'text-slate-500'}`}>
-                      {canPlayRanked ? "Win 90 PKR • Entry 50 PKR" : "Insufficient Funds to Play"}
+                      {canPlayRanked ? "Win 200 PKR • Entry 100 PKR" : "Insufficient Funds to Play"}
                     </span>
                   </div>
                 </div>
