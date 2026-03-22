@@ -347,10 +347,10 @@ const handleLogin = async (e) => {
   
   <div className="flex flex-col items-center lg:items-start">
     <p className="text-[9px] md:text-[10px] text-slate-400 font-black uppercase tracking-[0.2em]">
-      Current Build: <span className="text-slate-900">v4.4.9.1-Stable</span>
+      Current Build: <span className="text-slate-900">v5.0.0-Stable</span>
     </p>
     <p className="text-[9px] md:text-[10px] text-slate-300 font-bold uppercase tracking-widest">
-      Size: 25MB • Android 6.0+
+      Size: 25MB • Android 5.0+
     </p>
   </div>
 </div>
