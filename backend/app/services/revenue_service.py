@@ -40,9 +40,9 @@ class RevenueService:
                     "_id": None,
                     "total_matches": {"$sum": 1},
                     "draws": {"$sum": {"$cond": [{"$eq": ["$winner_id", "DRAW"]}, 1, 0]}},
-                    "total_collected": {"$sum": 100.0}, 
+                    "total_collected": {"$sum": 200.0}, 
                     "total_payout": {
-                        "$sum": {"$cond": [{"$eq": ["$winner_id", "DRAW"]}, 100.0, 90.0]}
+                        "$sum": {"$cond": [{"$eq": ["$winner_id", "DRAW"]}, 200.0, 200.0]}
                     }
                 }
             }

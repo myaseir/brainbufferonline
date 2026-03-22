@@ -41,7 +41,7 @@ async def wait_for_match_ready(match_id: str, user_id: str, timeout: int = 30):
                 from app.services.lobby_manager import lobby_manager
                 await lobby_manager.broadcast_user_status(user_id, "playing")
                 # 🚀 ADD THIS: Save details for Admin Dashboard
-                match_info = {"id": match_id, "p1_name": user_id, "p2_name": opponent_name, "stake": 50} # Adjust stake as needed
+                match_info = {"id": match_id, "p1_name": user_id, "p2_name": opponent_name, "stake": 100} # Adjust stake as needed
                 redis_client.set(f"match_details:{match_id}", json.dumps(match_info), ex=1800)
                 redis_client.sadd("active_matches_set", match_id)
                 redis_client.set(f"user_status:{user_id}", "playing", ex=600)
@@ -90,7 +90,7 @@ async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_sco
         if result_type == "OPPONENT_FLED":
             winner_id = user_id
             status_caller, status_op = "WON", "LOST"
-            summary_caller = "Opponent Fled! You Win! (+90 PKR)"
+            summary_caller = "Opponent Fled! You Win! (+200 PKR)"
             summary_op = "Match Abandoned."
         else:
             if f_my_score > f_op_score:
@@ -105,7 +105,7 @@ async def finalize_match(ws, match_id, user_id, opponent_id, result_type, my_sco
             
             # 2. Add "Early Victory" text if the match ended early
             prefix = "Early " if result_type == "EARLY_WIN" else ""
-            summary_caller = f"{prefix}Victory! (+90 PKR)" if status_caller == "WON" else f"Match {status_caller}"
+            summary_caller = f"{prefix}Victory! (+200 PKR)" if status_caller == "WON" else f"Match {status_caller}"
             summary_op = f"Opponent won by score." if status_op == "LOST" else f"Match {status_op}"
 
         # 3. Process Payout (Always happens since money is involved)

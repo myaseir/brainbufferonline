@@ -56,7 +56,7 @@ async def require_verified_user(current_user: dict = Depends(get_current_user)):
 
 async def validate_game_access(current_user: dict = Depends(require_verified_user)):
     """Now automatically checks for verification AND balance."""
-    MIN_ENTRY_FEE = 50.0 
+    MIN_ENTRY_FEE = 100.0 
     balance = current_user.get("wallet_balance", 0)
     
     if balance < MIN_ENTRY_FEE:

@@ -18,8 +18,8 @@ class DepositCreate(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "full_name": "Owais Afzal",
-                "sender_number": "03001234567",
+                "full_name": "Muhammad Yasir",
+                "sender_number": "03169030178",
                 "amount": 500.0,
                 "trx_id": "882736451"
             }

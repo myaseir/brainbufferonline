@@ -44,9 +44,9 @@ async def get_revenue(admin: dict = Depends(get_current_admin)):
     ]).to_list(1)
     
     # Note: total_matches in users is sum of both players. Actual matches = total / 2
-    # Fee per match is 100 (pool) - 90 (winner) = 10 PKR
+   # Fee per match is 200 (pool) - 2000 (winner) = 0 PKR
     match_count = (total_matches[0]["total"] if total_matches else 0) / 2
-    game_fees = int(match_count * 10)
+    game_fees = int(match_count * 0)
     
     net_profit = withdrawal_fees + game_fees
 

@@ -49,7 +49,7 @@ class WalletService:
         finally:
             redis_client.delete(lock_key)
 
-    async def deduct_entry_fee(self, user_id: str, fee: float = 50.0):
+    async def deduct_entry_fee(self, user_id: str, fee: float = 100.0):
         """
         Atomic deduction. Only allows if funds exist.
         """

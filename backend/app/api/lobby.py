@@ -64,7 +64,7 @@ async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
                     "type": "INCOMING_CHALLENGE",
                     "challenger_id": user_id,
                     "challenger_name": challenger_name,
-                    "bet_amount": 50,
+                    "bet_amount": 100,
                     "expires_in": 6 # Syncs with frontend timer
                 }, target_id)
                 
@@ -91,7 +91,7 @@ async def lobby_endpoint(websocket: WebSocket, token: str = Query(...)):
                 challenger_id = data.get('challenger_id')
                 accepter_id = user_id
                 wallet = WalletService()
-                bet_amount = 50.0
+                bet_amount = 100.0
 
                 try:
                     await wallet.deduct_entry_fee(challenger_id, bet_amount)

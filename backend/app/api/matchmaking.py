@@ -49,7 +49,7 @@ async def matchmaking_endpoint(websocket: WebSocket, token: str = Query(...)):
 
     try:
         # 3. Wallet Check & Initial Deduction
-        if not await user_repo.update_wallet(u_id_str, -50.0):
+        if not await user_repo.update_wallet(u_id_str, -100.0):
             await websocket.send_json({"type": "ERROR", "message": "Insufficient Balance"})
             await websocket.close()
             return
@@ -62,7 +62,7 @@ async def matchmaking_endpoint(websocket: WebSocket, token: str = Query(...)):
             opponent_id = result.decode() if isinstance(result, bytes) else str(result)
             match_id = f"match_{uuid.uuid4().hex[:8]}"
             
-            await match_repo.create_match_record(match_id, opponent_id, u_id_str, 50.0)
+            await match_repo.create_match_record(match_id, opponent_id, u_id_str, 100.0)
             await asyncio.to_thread(redis_client.set, f"notify:{opponent_id}", match_id, ex=300)
             
             # 🔥 ADD THIS: Create the live key for Human vs Human matches
@@ -74,7 +74,7 @@ async def matchmaking_endpoint(websocket: WebSocket, token: str = Query(...)):
                     "p1_id": u_id_str,
                     "p2_id": opponent_id,
                     "status": "CREATED",
-                    "bet_amount": "50.0"
+                    "bet_amount": "100.0"
                 }
             )
             await asyncio.to_thread(redis_client.expire, match_key, 120) # Match the 120s expiry
@@ -111,7 +111,7 @@ async def matchmaking_endpoint(websocket: WebSocket, token: str = Query(...)):
             bot_id = f"BOT_{bot_num:03d}"
             match_id = f"match_{uuid.uuid4().hex[:8]}"
 
-            await match_repo.create_match_record(match_id, bot_id, u_id_str, 50.0)
+            await match_repo.create_match_record(match_id, bot_id, u_id_str, 100.0)
             
             match_key = f"match:live:{match_id}"
             await asyncio.to_thread(
@@ -121,7 +121,7 @@ async def matchmaking_endpoint(websocket: WebSocket, token: str = Query(...)):
                     "p1_id": u_id_str,
                     "p2_id": bot_id,
                     "status": "CREATED",
-                    "bet_amount": "50.0"
+                    "bet_amount": "100.0"
                 }
             )
             await asyncio.to_thread(redis_client.expire, match_key, 120)
@@ -164,14 +164,14 @@ async def matchmaking_endpoint(websocket: WebSocket, token: str = Query(...)):
                 
                 # If they were in the pool OR they were matched but never played
                 if removed or notif:
-                    await user_repo.update_wallet(u_id_str, 50.0)
+                    await user_repo.update_wallet(u_id_str, 100.0)
                     if notif:
                         await asyncio.to_thread(redis_client.delete, f"notify:{u_id_str}")
                     logger.info(f"✅ Emergency Refund for {u_id_str} after WebSocket Error")
                 else:
                     # Final Fallback: If we deducted but can't find them in Redis, 
                     # they are entitled to a refund.
-                    await user_repo.update_wallet(u_id_str, 50.0)
+                    await user_repo.update_wallet(u_id_str, 100.0)
                     logger.warning(f"🚨 Forced Refund for {u_id_str} due to state mismatch")
             except Exception as refund_err:
                 logger.error(f"❌ CRITICAL: Refund failed during cleanup: {refund_err}")

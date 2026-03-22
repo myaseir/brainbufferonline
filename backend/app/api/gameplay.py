@@ -99,7 +99,7 @@ async def game_websocket_endpoint(
                 from app.services.wallet_service import WalletService
                 wallet_service = WalletService()
                 bet_raw = await asyncio.to_thread(redis_client.hget, match_key, "bet_amount")
-                bet_amount = float(to_str(bet_raw)) if bet_raw else 50.0
+                bet_amount = float(to_str(bet_raw)) if bet_raw else 100.0
                 await wallet_service.refund_user(u_id_str, bet_amount)
                 await websocket.close()
                 return

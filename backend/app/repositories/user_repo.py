@@ -179,10 +179,10 @@ class UserRepository:
                     )
 
                     if is_draw:
-                        await self.update_wallet(player1_id, 50.0, session=session)
-                        await self.update_wallet(player2_id, 50.0, session=session)
+                        await self.update_wallet(player1_id, 100.0, session=session)
+                        await self.update_wallet(player2_id, 100.0, session=session)
                     else:
-                        await self.update_wallet(winner_id, 90.0, session=session)
+                        await self.update_wallet(winner_id, 200.0, session=session)
 
                     await self.record_match_stats(player1_id, is_win=(winner_id == player1_id), session=session)
                     await self.record_match_stats(player2_id, is_win=(winner_id == player2_id), session=session)

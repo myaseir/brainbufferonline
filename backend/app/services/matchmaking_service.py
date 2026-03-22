@@ -25,7 +25,7 @@ class MatchmakingService:
     async def find_or_create_match(self, user_id: str):
         # 1. 💰 Wallet Check
         user = await self.user_repo.get_by_id(user_id)
-        if not user or user.get("wallet_balance", 0) < 50:
+        if not user or user.get("wallet_balance", 0) < 100:
             raise HTTPException(status_code=400, detail="Insufficient funds")
 
         try:
@@ -47,30 +47,30 @@ class MatchmakingService:
                     return {"status": "WAITING"}
 
                 # --- ✅ MATCH FOUND: DEDUCT & CREATE ---
-                await self.user_repo.update_wallet(user_id, -50.0)
+                await self.user_repo.update_wallet(user_id, -100.0)
                 
                 match_id = f"match_{uuid.uuid4().hex[:8]}"
 
                 try:
-                    await self.match_repo.create_match_record(match_id, opponent_id, user_id, 50.0)
+                    await self.match_repo.create_match_record(match_id, opponent_id, user_id, 100.0)
                     redis_client.set(f"notify:{opponent_id}", match_id, ex=30)
                     
                     return {
                         "status": "MATCHED",
                         "match_id": match_id,
                         "opponent_id": opponent_id,
-                        "entry_fee": 50.0
+                        "entry_fee": 100.0
                     }
 
                 except Exception as db_error:
                     logger.error(f"❌ Failed to create match in DB: {db_error}")
-                    await self.user_repo.update_wallet(user_id, 50.0)
+                    await self.user_repo.update_wallet(user_id, 100.0)
                     redis_client.sadd("matchmaking_pool", opponent_id)
                     raise HTTPException(status_code=500, detail="Match creation failed. Funds refunded.")
 
             else:
                 # --- ⏳ JOIN THE POOL & START BOT TIMER ---
-                await self.user_repo.update_wallet(user_id, -50.0)
+                await self.user_repo.update_wallet(user_id, -100.0)
                 
                 try:
                     redis_client.sadd("matchmaking_pool", user_id)
@@ -96,14 +96,14 @@ class MatchmakingService:
                     match_id = f"match_{uuid.uuid4().hex[:8]}"
 
                     # 3. Create Record & Redis Metadata
-                    await self.match_repo.create_match_record(match_id, bot_id, user_id, 50.0)
+                    await self.match_repo.create_match_record(match_id, bot_id, user_id, 100.0)
                     
                     match_key = f"match:live:{match_id}"
                     redis_client.hset(match_key, mapping={ 
                         "p1_id": user_id,
                         "p2_id": bot_id,
                         "status": "CREATED",
-                        "bet_amount": "50.0"
+                        "bet_amount": "100.0"
                     })
                     redis_client.expire(match_key, 600)
 
@@ -115,12 +115,12 @@ class MatchmakingService:
                         "status": "MATCHED",
                         "match_id": match_id,
                         "opponent_id": bot_id,
-                        "entry_fee": 50.0
+                        "entry_fee": 100.0
                     }
 
                 except Exception as redis_err:
                     logger.error(f"Bot/Pool Error: {redis_err}")
-                    await self.user_repo.update_wallet(user_id, 50.0) 
+                    await self.user_repo.update_wallet(user_id, 100.0) 
                     redis_client.srem("matchmaking_pool", user_id)
                     raise HTTPException(status_code=500, detail="Matchmaking server busy. Funds refunded.")
 
@@ -142,14 +142,14 @@ class MatchmakingService:
 
     async def cancel_matchmaking(self, user_id: str):
         """
-        Removes user from pool and refunds the 50 PKR. 
+        Removes user from pool and refunds the 100 PKR. 
         Professional Update: Also refunds if a match was found but the game hasn't truly started.
         """
         try:
             # 1. Standard Case: User is still in the pool
             removed = redis_client.srem("matchmaking_pool", user_id)
             if removed:
-                await self.user_repo.update_wallet(user_id, 50.0)
+                await self.user_repo.update_wallet(user_id, 100.0)
                 logger.info(f"✅ User {user_id} cancelled and was refunded 50 PKR.")
                 return {"status": "cancelled", "refunded": True}
             
@@ -166,7 +166,7 @@ class MatchmakingService:
                 if not has_score:
                     # Clear the notification and refund
                     redis_client.delete(f"notify:{user_id}")
-                    await self.user_repo.update_wallet(user_id, 50.0)
+                    await self.user_repo.update_wallet(user_id, 100.0)
                     logger.info(f"✅ User {user_id} refunded for unstarted match: {match_id}")
                     return {"status": "cancelled", "refunded": True}
                 else:
