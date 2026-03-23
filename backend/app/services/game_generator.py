@@ -4,7 +4,11 @@ def generate_fair_game(total_rounds=20):
     game_rounds = []
     for r in range(1, total_rounds + 1):
         count = min(3 + (r - 1) // 2, 8)
-        numbers = random.sample(range(1, 21), count)
+        
+        if r >= 5:
+            numbers = random.sample(range(1, 51), count)
+        else:
+            numbers = random.sample(range(1, 21), count)
         positions = []
         
         for _ in range(count):
